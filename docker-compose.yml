@@ -1,0 +1,84 @@
+# Local dependencies only: the backend itself runs from the IDE or ./mvnw spring-boot:run.
+# Production compose (backend + Nginx + TLS + backups) is written in B19.
+name: school-local
+
+services:
+  # MongoDB as a single-node replica set. A replica set is mandatory, not optional: payment and
+  # receipt writes use multi-document transactions, which standalone mongod does not support.
+  mongo:
+    image: mongo:7
+    container_name: school-mongo
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # One-shot: initiates rs0 if it is not initiated yet, then exits. Safe to re-run.
+  mongo-init:
+    image: mongo:7
+    container_name: school-mongo-init
+    depends_on:
+      mongo:
+        condition: service_healthy
+    volumes:
+      - ./docker/mongo:/scripts:ro
+    # The member host is localhost:27017 so clients on the host machine can reach the advertised
+    # member; containers on this network should connect with directConnection=true.
+    command: ["mongosh", "--host", "mongo", "--quiet", "--file", "/scripts/init-replica-set.js"]
+    restart: "no"
+
+  # MinIO, our local stand-in for the S3-compatible store used in production.
+  #
+  # NOTE ON THE IMAGE: minio/minio and minio/mc are no longer publicly pullable (Docker Hub returns
+  # "object not found", quay.io returns 401), so this uses Bitnami's archived MinIO build, which is
+  # the same MinIO server. If you have access to an official MinIO registry or a mirror, swap the two
+  # image references below; nothing else changes, because the app only speaks the S3 API to it.
+  minio:
+    image: bitnamilegacy/minio:latest
+    container_name: school-minio
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:-minioadmin}
+      MINIO_DEFAULT_BUCKETS: ${STORAGE_BUCKET:-school-media}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/bitnami/minio/data
+
+  # One-shot: creates the bucket if it is missing and makes only the public/ prefix anonymously
+  # readable (logo, favicon, gallery). Everything else — receipts, exam papers, credential
+  # sheets — stays private and is served through pre-signed URLs.
+  minio-init:
+    image: bitnamilegacy/minio-client:latest
+    container_name: school-minio-init
+    depends_on:
+      - minio
+    environment:
+      BUCKET: ${STORAGE_BUCKET:-school-media}
+      ACCESS_KEY: ${STORAGE_ACCESS_KEY:-minioadmin}
+      SECRET_KEY: ${STORAGE_SECRET_KEY:-minioadmin}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        until mc alias set local http://minio:9000 "$$ACCESS_KEY" "$$SECRET_KEY" >/dev/null 2>&1; do
+          echo "waiting for minio..."
+          sleep 2
+        done
+        mc mb --ignore-existing "local/$$BUCKET"
+        mc anonymous set download "local/$$BUCKET/public"
+        echo "bucket $$BUCKET ready (only public/ is anonymously readable)"
+    restart: "no"
+
+volumes:
+  mongo-data:
+  minio-data:

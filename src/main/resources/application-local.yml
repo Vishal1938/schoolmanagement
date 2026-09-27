@@ -1,0 +1,25 @@
+# Local development profile: ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
+#
+# Reads the untracked .env in the project root (copy it from .env.example). The file is parsed as
+# properties, so KEY=value lines land as properties named exactly like the environment variables
+# referenced from application.yml.
+spring:
+  config:
+    import: optional:file:./.env[.properties]
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/school?replicaSet=rs0&directConnection=true}
+
+logging:
+  level:
+    com.school: DEBUG
+    org.springframework.data.mongodb.core.MongoTemplate: DEBUG
+
+management:
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  swagger-ui:
+    try-it-out-enabled: true
