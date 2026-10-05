@@ -1,0 +1,154 @@
+{
+  "identity": {
+    "name": "Demo Vidya Mandir Senior Secondary School",
+    "tagline": "Learn with curiosity, lead with character",
+    "logoUrl": "http://localhost:9000/school-media/public/logo/logo.png",
+    "faviconUrl": "http://localhost:9000/school-media/public/favicon/favicon.ico",
+    "theme": {
+      "primary": "#0B3D91",
+      "secondary": "#F2A93B",
+      "accent": "#12B886"
+    }
+  },
+  "landing": {
+    "about": "Demo Vidya Mandir has taught the children of this district since 1994. We are a co-educational, English-medium school affiliated to the state board, teaching classes Nursery to XII across two shifts on a six-acre campus. Our class sizes are capped at thirty-five so that every child is known by name, and every teacher is expected to know how each of their students is doing, not just what the average is. Science and commerce streams are offered at the senior secondary level, alongside a humanities stream introduced in 2019.",
+    "vision": "To send out young people who think clearly, speak honestly and are useful to the community they live in.",
+    "principal": {
+      "name": "Dr. Anita Deshpande",
+      "designation": "Principal",
+      "photoUrl": "http://localhost:9000/school-media/public/gallery/principal.jpg",
+      "message": "A school is not its building. It is the habits a child picks up between the morning bell and the evening bus, and the adults who model them. We keep our promises small and keep them: teachers who prepare, homework that gets read, parents who hear from us before a problem grows, and a classroom where a wrong answer is the start of a conversation rather than the end of one. You are welcome to visit us on any working day and see whether we live up to that."
+    },
+    "academics": {
+      "board": "Madhya Pradesh Board of Secondary Education",
+      "summary": "Teaching runs from Nursery to class XII in English medium, with science, commerce and humanities streams at the senior secondary level. Class sizes are capped at thirty-five, and every teacher keeps a weekly record of how each child is progressing rather than only what the class average was.",
+      "levels": [
+        {
+          "name": "Pre-primary",
+          "range": "Nursery to UKG",
+          "description": "Play-led learning, with phonics, number sense and a great deal of time outdoors."
+        },
+        {
+          "name": "Primary",
+          "range": "Classes I to V",
+          "description": "Reading fluency, written expression and arithmetic, with art, music and games every week."
+        },
+        {
+          "name": "Middle",
+          "range": "Classes VI to VIII",
+          "description": "Subject teachers take over, laboratory work begins, and students choose a third language."
+        },
+        {
+          "name": "Secondary",
+          "range": "Classes IX and X",
+          "description": "Board preparation with weekly tests, remedial classes and one-to-one parent meetings each term."
+        },
+        {
+          "name": "Senior secondary",
+          "range": "Classes XI and XII",
+          "description": "Science, commerce and humanities streams, with career counselling and entrance-exam coaching."
+        }
+      ]
+    },
+    "highlights": [
+      {
+        "title": "Thirty-two years in the district",
+        "description": "Teaching the children, and now the grandchildren, of the families around us since 1994.",
+        "icon": "school"
+      },
+      {
+        "title": "Thirty-five to a class",
+        "description": "Small enough that every child is known by name and no one hides at the back.",
+        "icon": "users"
+      },
+      {
+        "title": "Laboratories, not demonstrations",
+        "description": "Physics, chemistry and biology practicals that students run themselves from class VI.",
+        "icon": "flask"
+      },
+      {
+        "title": "Parents hear from us early",
+        "description": "A call before a problem grows, not a report card after it has.",
+        "icon": "message-circle"
+      },
+      {
+        "title": "Sport for everyone",
+        "description": "A 400m track, covered courts and an inter-house season that every student plays in.",
+        "icon": "ball-basketball"
+      },
+      {
+        "title": "Safe journeys",
+        "description": "GPS-tracked buses on fourteen routes, with a staff escort on each.",
+        "icon": "bus"
+      }
+    ],
+    "facilities": [
+      "Physics, chemistry and biology laboratories",
+      "Computer laboratory with 40 workstations",
+      "Library with over 12,000 titles",
+      "Smart classrooms for classes VI to XII",
+      "Covered basketball and volleyball courts",
+      "400m athletics track and cricket ground",
+      "Music and dance studio",
+      "Art and craft room",
+      "Infirmary with a full-time nurse",
+      "GPS-tracked bus service on 14 routes",
+      "RO drinking water on every floor",
+      "CCTV-monitored corridors and gates"
+    ],
+    "galleryImageUrls": [
+      "http://localhost:9000/school-media/public/gallery/campus-front.jpg",
+      "http://localhost:9000/school-media/public/gallery/assembly-ground.jpg",
+      "http://localhost:9000/school-media/public/gallery/science-lab.jpg",
+      "http://localhost:9000/school-media/public/gallery/library.jpg",
+      "http://localhost:9000/school-media/public/gallery/annual-day.jpg",
+      "http://localhost:9000/school-media/public/gallery/sports-meet.jpg"
+    ],
+    "stats": {
+      "students": 1240,
+      "teachers": 68,
+      "years": 32,
+      "passPercentage": 98
+    },
+    "contact": {
+      "addressLine1": "17 Shastri Marg",
+      "addressLine2": "Near Civil Lines Post Office",
+      "city": "Demo City",
+      "state": "Madhya Pradesh",
+      "postalCode": "462001",
+      "phone": "+91 755 400 1200",
+      "alternatePhone": "+91 98260 11223",
+      "email": "office@demo-vidya-mandir.example",
+      "websiteUrl": "https://demo-vidya-mandir.example"
+    },
+    "mapEmbedUrl": "https://www.google.com/maps/embed?pb=REPLACE_WITH_THE_EMBED_LINK_FROM_GOOGLE_MAPS",
+    "socialLinks": {
+      "facebook": "https://facebook.com/demo-vidya-mandir",
+      "instagram": "https://instagram.com/demo_vidya_mandir",
+      "youtube": "https://youtube.com/@demo-vidya-mandir",
+      "twitter": null,
+      "linkedin": null
+    }
+  },
+  "gradingScheme": {
+    "mode": "BOTH",
+    "bands": [
+      { "grade": "A1", "minPercentage": 91, "maxPercentage": 100, "remark": "Outstanding" },
+      { "grade": "A2", "minPercentage": 81, "maxPercentage": 90, "remark": "Excellent" },
+      { "grade": "B1", "minPercentage": 71, "maxPercentage": 80, "remark": "Very good" },
+      { "grade": "B2", "minPercentage": 61, "maxPercentage": 70, "remark": "Good" },
+      { "grade": "C1", "minPercentage": 51, "maxPercentage": 60, "remark": "Above average" },
+      { "grade": "C2", "minPercentage": 41, "maxPercentage": 50, "remark": "Average" },
+      { "grade": "D", "minPercentage": 33, "maxPercentage": 40, "remark": "Pass" },
+      { "grade": "E", "minPercentage": 0, "maxPercentage": 32, "remark": "Needs improvement" }
+    ]
+  },
+  "academicSettings": {
+    "workingDays": ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"],
+    "attendanceEditWindowHours": 48,
+    "receiptPrefix": "DVM-RCP",
+    "receiptFooter": "This receipt is computer generated. Fees once paid are not refundable. For any correction, write to the accounts office within seven days quoting the receipt number.",
+    "salarySlipFooter": "This salary slip is computer generated and does not require a signature. Raise any discrepancy with the accounts office within fifteen days of issue.",
+    "reportCardFooter": "This report card is issued by the school and is valid only with the signatures of the class teacher and the principal. Any discrepancy must be reported to the school office within fifteen days of issue."
+  }
+}

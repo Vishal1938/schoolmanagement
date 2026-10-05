@@ -17,7 +17,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Context-level checks that do not need a database. The Mongo health indicator is switched off here;
  * {@code MongoReplicaSetIT} covers health against a real replica set.
  */
-@SpringBootTest(properties = "management.health.mongo.enabled=false")
+@SpringBootTest(properties = {
+		"management.health.mongo.enabled=false",
+		// Seeding would be the only thing here that needs a database.
+		"app.seed.enabled=false",
+		// Entities declare indexes, and creating them eagerly needs a live server. The integration
+		// tests cover index creation against a real replica set.
+		"spring.data.mongodb.auto-index-creation=false"
+})
 @AutoConfigureMockMvc
 class ApplicationStartupTest {
 

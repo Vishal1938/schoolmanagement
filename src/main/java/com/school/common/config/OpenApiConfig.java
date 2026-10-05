@@ -6,7 +6,6 @@ import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
-import io.swagger.v3.oas.models.servers.Server;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -20,7 +19,7 @@ public class OpenApiConfig {
 	public static final String BEARER_SCHEME = "bearerAuth";
 
 	@Bean
-	public OpenAPI schoolManagementOpenApi(AppProperties properties) {
+	public OpenAPI schoolManagementOpenApi() {
 		return new OpenAPI()
 				.info(new Info()
 						.title("School Management API")
@@ -28,7 +27,9 @@ public class OpenApiConfig {
 						.description("Backend for a single school deployment. Roles: ADMIN, TEACHER, STUDENT, STAFF. "
 								+ "All money values are long paise.")
 						.license(new License().name("Proprietary")))
-				.addServersItem(new Server().url(properties.apiBasePath()).description("Current deployment"))
+				// No servers entry: WebConfig's path prefix means every path in the spec already starts
+				// with app.api-base-path, so adding it as a server URL would make generated clients call
+				// /api/v1/api/v1/... The spec is served from the same origin as the API.
 				.components(new Components().addSecuritySchemes(BEARER_SCHEME, new SecurityScheme()
 						.type(SecurityScheme.Type.HTTP)
 						.scheme("bearer")
