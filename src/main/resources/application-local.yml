@@ -3,12 +3,24 @@
 # Reads the untracked .env in the project root (copy it from .env.example). The file is parsed as
 # properties, so KEY=value lines land as properties named exactly like the environment variables
 # referenced from application.yml.
+#
+# The import is deliberately NOT `optional:`. The path is relative to the working directory, so a
+# launch from anywhere but the project root would silently skip it, fall back to the localhost
+# MONGODB_URI default in application.yml and only surface 30 s later as a Mongo server-selection
+# timeout. Failing at startup instead names the real problem.
 spring:
   config:
-    import: optional:file:./.env[.properties]
+    import: file:./.env[.properties]
   data:
     mongodb:
+      # Comes from .env in practice, since the import above is mandatory. The fallback is the local
+      # docker compose replica set; a real connection string must not be committed here.
       uri: ${MONGODB_URI:mongodb://localhost:27017/school?replicaSet=rs0&directConnection=true}
+
+app:
+  jwt:
+    # http://localhost, so a Secure cookie would never be stored or sent back.
+    cookie-secure: ${JWT_COOKIE_SECURE:false}
 
 logging:
   level:

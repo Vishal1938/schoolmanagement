@@ -58,12 +58,12 @@ Each feature package contains `api` (controllers and request/response DTOs), `ap
 `SCHOOL_CODE`, `MONGODB_URI`, `JWT_SECRET`, `JWT_ACCESS_TTL=15m`, `JWT_REFRESH_TTL=7d`, `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD`, `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `APP_FEATURES_AI=false`, `AI_API_KEY`, `SMTP_*` (optional)
 
 ## Definition of done (every task)
-- The code compiles with no warnings you introduced.
-- Unit tests cover the services, and at least one MockMvc test per endpoint covers happy path, forbidden and validation.
-- The OpenAPI spec reflects the endpoints and they match `API_CONTRACT.md`. If they have to differ, update the contract and flag it in your summary so it can be copied to the frontend repo.
-- The module-boundary test still passes.
-- Finish with a short summary: what was built, anything not done, and any contract changes.
-
+- Do NOT write test classes unless I explicitly ask. I test manually.
+- Do NOT run ./mvnw verify; just make sure it compiles (./mvnw compile).
+- Local only. No production config, no extra profiles, no Docker/CI changes
+  unless the task says so. Keep it simple.
+- Finish with a short summary (max 15 lines): files created/changed,
+  endpoints added, how to test them manually with curl or Swagger.
 ## Commands
 - `docker compose up -d` starts MongoDB (replica set) and MinIO
 - `./mvnw spring-boot:run -Dspring-boot.run.profiles=local`

@@ -1,7 +1,6 @@
 package com.school;
 
-import java.util.Map;
-
+import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -29,7 +28,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>Requires a running Docker daemon; it is bound to the {@code verify} phase, not {@code test}.
  */
-@SpringBootTest
+// Seeding off: this test is about the replica set and transactions, and nothing here needs a seeded
+// database. It also keeps B2's BootstrapAdminInitializer out of startup — against a fresh container it
+// finds no ADMIN, and with no BOOTSTRAP_ADMIN_* configured it deliberately refuses to start.
+@SpringBootTest(properties = "app.seed.enabled=false")
 @AutoConfigureMockMvc
 // Skipped instead of failed on a machine without a Docker daemon; CI always has one, so it runs there.
 @Testcontainers(disabledWithoutDocker = true)
@@ -57,18 +59,25 @@ class MongoReplicaSetIT {
 				.andExpect(jsonPath("$.status").value("UP"));
 	}
 
+	/**
+	 * The documents are {@link Document} rather than {@code Map.of(...)} on purpose. A successful
+	 * insert ends in {@code MongoTemplate.populateIdIfNecessary}, which, for anything that is a
+	 * {@code Map}, puts the generated {@code _id} straight back into the object it was handed —
+	 * so an immutable map throws {@code UnsupportedOperationException} <em>after</em> the write,
+	 * failing the test on the assertion rather than on anything to do with transactions.
+	 */
 	@Test
 	void multiDocumentTransactionsCommitAndRollBack() {
 		mongoTemplate.remove(new Query(), COLLECTION);
 
 		transactionTemplate.executeWithoutResult(status -> {
-			mongoTemplate.insert(Map.of("probe", "committed-1"), COLLECTION);
-			mongoTemplate.insert(Map.of("probe", "committed-2"), COLLECTION);
+			mongoTemplate.insert(new Document("probe", "committed-1"), COLLECTION);
+			mongoTemplate.insert(new Document("probe", "committed-2"), COLLECTION);
 		});
 		assertThat(mongoTemplate.count(new Query(), COLLECTION)).isEqualTo(2);
 
 		assertThatThrownBy(() -> transactionTemplate.executeWithoutResult(status -> {
-			mongoTemplate.insert(Map.of("probe", "rolled-back"), COLLECTION);
+			mongoTemplate.insert(new Document("probe", "rolled-back"), COLLECTION);
 			throw new IllegalStateException("forced rollback");
 		})).isInstanceOf(IllegalStateException.class);
 

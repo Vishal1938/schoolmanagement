@@ -13,6 +13,7 @@ import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
@@ -112,6 +113,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	public ResponseEntity<ProblemDetail> handleDuplicateKey(DuplicateKeyException ex, HttpServletRequest request) {
 		log.debug("Duplicate key on {} {}", request.getMethod(), request.getRequestURI(), ex);
 		return respond(ErrorType.CONFLICT, "The resource already exists", Map.of(), request);
+	}
+
+	/**
+	 * Two admins saving the same document at once: the second save loses the optimistic lock. A 409
+	 * tells the client to reload and reapply, which is true, where a 500 would suggest a server fault.
+	 */
+	@ExceptionHandler(OptimisticLockingFailureException.class)
+	public ResponseEntity<ProblemDetail> handleOptimisticLocking(OptimisticLockingFailureException ex,
+			HttpServletRequest request) {
+		log.debug("Optimistic locking failure on {} {}", request.getMethod(), request.getRequestURI(), ex);
+		return respond(ErrorType.CONFLICT, "Someone else changed this while you were editing it. "
+				+ "Reload and apply your change again.", Map.of(), request);
 	}
 
 	@Override

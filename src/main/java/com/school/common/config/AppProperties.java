@@ -5,6 +5,7 @@ import java.time.Duration;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
+import org.springframework.util.unit.DataSize;
 import org.springframework.validation.annotation.Validated;
 
 /**
@@ -27,7 +28,8 @@ public record AppProperties(
 		@DefaultValue Storage storage,
 		@DefaultValue Razorpay razorpay,
 		@DefaultValue BootstrapAdmin bootstrapAdmin,
-		@DefaultValue Encryption encryption) {
+		@DefaultValue Encryption encryption,
+		@DefaultValue Seed seed) {
 
 	/** Feature switches. AI stays off unless explicitly enabled (B18). */
 	public record Features(@DefaultValue("false") boolean ai) {
@@ -36,15 +38,30 @@ public record AppProperties(
 	/**
 	 * Access-token signing and refresh-token lifetime (B2). The refresh cookie is scoped to
 	 * {@code cookiePath} so it is never sent to non-auth endpoints.
+	 *
+	 * @param cookieSecure whether the refresh cookie carries {@code Secure}. True everywhere but the local
+	 *                     profile, which is served over plain http
 	 */
 	public record Jwt(
 			String secret,
 			@DefaultValue("15m") Duration accessTtl,
 			@DefaultValue("7d") Duration refreshTtl,
-			@DefaultValue("/api/v1/auth") String cookiePath) {
+			@DefaultValue("/api/v1/auth") String cookiePath,
+			@DefaultValue("true") boolean cookieSecure) {
 	}
 
-	/** S3-compatible object storage: MinIO locally, anything S3-compatible in production. */
+	/**
+	 * S3-compatible object storage: MinIO locally, Cloudflare R2 (or any S3-compatible store) in
+	 * production. Only the endpoint and credentials differ between the two.
+	 *
+	 * @param publicPrefix   key prefix whose objects are readable without a pre-signed URL. Locally
+	 *                       docker compose grants this with an anonymous-download policy; on R2 it is
+	 *                       the prefix exposed through the public bucket URL or custom domain.
+	 * @param publicBaseUrl  URL public objects are served from, e.g. an R2 custom domain. When unset,
+	 *                       {@code endpoint/bucket} is used, which is what MinIO serves locally.
+	 * @param maxImageSize      per-file limit for image uploads, below the multipart transport limit
+	 * @param maxAttachmentSize per-file limit for notice attachments (B10), likewise below it
+	 */
 	public record Storage(
 			String endpoint,
 			String bucket,
@@ -52,7 +69,18 @@ public record AppProperties(
 			String secretKey,
 			@DefaultValue("us-east-1") String region,
 			@DefaultValue("public/") String publicPrefix,
-			@DefaultValue("true") boolean pathStyleAccess) {
+			@DefaultValue("true") boolean pathStyleAccess,
+			String publicBaseUrl,
+			@DefaultValue("5MB") DataSize maxImageSize,
+			@DefaultValue("10MB") DataSize maxAttachmentSize) {
+
+		/** Base URL for public objects, without a trailing slash. */
+		public String resolvedPublicBaseUrl() {
+			String base = publicBaseUrl == null || publicBaseUrl.isBlank()
+					? endpoint + "/" + bucket
+					: publicBaseUrl;
+			return base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+		}
 	}
 
 	/** Payment gateway credentials (B12). The webhook secret verifies inbound callbacks. */
@@ -65,5 +93,19 @@ public record AppProperties(
 
 	/** Base64 AES key for field-level encryption of employee bank details (B6). */
 	public record Encryption(String key) {
+	}
+
+	/**
+	 * First-boot seeding of the {@code school_config} document (B1).
+	 *
+	 * @param enabled              set to {@code false} in tests, and anywhere the database must not be
+	 *                             written to on startup
+	 * @param schoolConfigLocation any Spring resource location. The default ships inside the jar;
+	 *                             point it at {@code file:./seed/school-seed.json} to replace the seed
+	 *                             for a deployment without rebuilding.
+	 */
+	public record Seed(
+			@DefaultValue("true") boolean enabled,
+			@DefaultValue("classpath:seed/school-seed.json") @NotBlank String schoolConfigLocation) {
 	}
 }

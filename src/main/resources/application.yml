@@ -5,10 +5,18 @@ spring:
     banner-mode: off
   data:
     mongodb:
+      # Default is the local docker compose replica set. A real connection string belongs in the
+      # environment (or in the untracked .env the local profile imports), never in this file.
       uri: ${MONGODB_URI:mongodb://localhost:27017/school?replicaSet=rs0&directConnection=true}
       # Indexes are declared in code with @Indexed/@CompoundIndex, so let Spring Data create them.
       auto-index-creation: true
       uuid-representation: standard
+    web:
+      pageable:
+        # API_CONTRACT.md §1: page is 0-based and size is at most 100. Enforced here rather than in
+        # every controller, so no list endpoint can be talked into returning the whole collection.
+        default-page-size: 20
+        max-page-size: 100
   jackson:
     default-property-inclusion: non_null
     serialization:
@@ -45,6 +53,8 @@ app:
     access-ttl: ${JWT_ACCESS_TTL:15m}
     refresh-ttl: ${JWT_REFRESH_TTL:7d}
     cookie-path: /api/v1/auth
+    # Secure by default; the local profile turns it off because it serves plain http.
+    cookie-secure: ${JWT_COOKIE_SECURE:true}
   storage:
     endpoint: ${STORAGE_ENDPOINT:http://localhost:9000}
     bucket: ${STORAGE_BUCKET:school-media}
@@ -53,6 +63,11 @@ app:
     region: ${STORAGE_REGION:us-east-1}
     public-prefix: public/
     path-style-access: true
+    # Where public objects are read from. Empty means endpoint/bucket, which is what MinIO serves
+    # locally; in production set it to the R2 custom domain or public bucket URL.
+    public-base-url: ${STORAGE_PUBLIC_BASE_URL:}
+    max-image-size: ${STORAGE_MAX_IMAGE_SIZE:5MB}
+    max-attachment-size: ${STORAGE_MAX_ATTACHMENT_SIZE:10MB}
   razorpay:
     key-id: ${RAZORPAY_KEY_ID:}
     key-secret: ${RAZORPAY_KEY_SECRET:}
@@ -65,6 +80,11 @@ app:
     key: ${ENCRYPTION_KEY:}
   ai:
     api-key: ${AI_API_KEY:}
+  seed:
+    # First boot loads school_config from this file. Any Spring resource location works; point it at
+    # file:./seed/school-seed.json to change a deployment's seed without rebuilding.
+    enabled: ${APP_SEED_ENABLED:true}
+    school-config-location: ${APP_SEED_SCHOOL_CONFIG:classpath:seed/school-seed.json}
 
 management:
   endpoints:
