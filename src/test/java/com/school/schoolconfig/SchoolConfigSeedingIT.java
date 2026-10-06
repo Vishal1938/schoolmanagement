@@ -24,7 +24,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>Requires a running Docker daemon; bound to the {@code verify} phase, not {@code test}.
  */
-@SpringBootTest(properties = "app.school-code=ITS")
+// Seeding stays ON here — it is the subject of the test. That also runs B2's
+// BootstrapAdminInitializer, which against a fresh container finds no ADMIN and then refuses to start
+// unless it has credentials to create one, so throwaway ones are supplied. They are deliberately
+// unusable outside this test: .invalid is the reserved TLD for exactly this (RFC 2606).
+@SpringBootTest(properties = {
+		"app.school-code=ITS",
+		"app.bootstrap-admin.email=integration-test@school.invalid",
+		"app.bootstrap-admin.password=integration-test-only-never-a-real-password"
+})
 @AutoConfigureMockMvc
 @Testcontainers(disabledWithoutDocker = true)
 class SchoolConfigSeedingIT {

@@ -29,7 +29,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>Requires a running Docker daemon; it is bound to the {@code verify} phase, not {@code test}.
  */
-@SpringBootTest
+// Seeding off: this test is about the replica set and transactions, and nothing here needs a seeded
+// database. It also keeps B2's BootstrapAdminInitializer out of startup — against a fresh container it
+// finds no ADMIN, and with no BOOTSTRAP_ADMIN_* configured it deliberately refuses to start.
+@SpringBootTest(properties = "app.seed.enabled=false")
 @AutoConfigureMockMvc
 // Skipped instead of failed on a machine without a Docker daemon; CI always has one, so it runs there.
 @Testcontainers(disabledWithoutDocker = true)
