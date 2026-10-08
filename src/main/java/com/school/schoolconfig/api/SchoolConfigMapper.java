@@ -27,24 +27,29 @@ public interface SchoolConfigMapper {
 	/**
 	 * Flattens identity and landing content into the public projection. Every target is listed
 	 * explicitly, so nothing reaches this response without a line of code putting it there.
+	 *
+	 * <p>{@code features} is a second source rather than a field of the document, because it is an
+	 * environment switch and not something a school edits. Every other source is qualified with
+	 * {@code config.} for the same reason: with two parameters, MapStruct needs to be told which one.
 	 */
-	@Mapping(target = "name", source = "identity.name")
-	@Mapping(target = "tagline", source = "identity.tagline")
-	@Mapping(target = "logoUrl", source = "identity.logoUrl")
-	@Mapping(target = "faviconUrl", source = "identity.faviconUrl")
-	@Mapping(target = "theme", source = "identity.theme")
-	@Mapping(target = "about", source = "landing.about")
-	@Mapping(target = "vision", source = "landing.vision")
-	@Mapping(target = "principal", source = "landing.principal")
-	@Mapping(target = "academics", source = "landing.academics")
-	@Mapping(target = "highlights", source = "landing.highlights")
-	@Mapping(target = "facilities", source = "landing.facilities")
-	@Mapping(target = "galleryImageUrls", source = "landing.galleryImageUrls")
-	@Mapping(target = "stats", source = "landing.stats")
-	@Mapping(target = "contact", source = "landing.contact")
-	@Mapping(target = "mapEmbedUrl", source = "landing.mapEmbedUrl")
-	@Mapping(target = "socialLinks", source = "landing.socialLinks")
-	PublicSchoolResponse toPublicResponse(SchoolConfig config);
+	@Mapping(target = "name", source = "config.identity.name")
+	@Mapping(target = "tagline", source = "config.identity.tagline")
+	@Mapping(target = "logoUrl", source = "config.identity.logoUrl")
+	@Mapping(target = "faviconUrl", source = "config.identity.faviconUrl")
+	@Mapping(target = "theme", source = "config.identity.theme")
+	@Mapping(target = "about", source = "config.landing.about")
+	@Mapping(target = "vision", source = "config.landing.vision")
+	@Mapping(target = "principal", source = "config.landing.principal")
+	@Mapping(target = "academics", source = "config.landing.academics")
+	@Mapping(target = "highlights", source = "config.landing.highlights")
+	@Mapping(target = "facilities", source = "config.landing.facilities")
+	@Mapping(target = "galleryImageUrls", source = "config.landing.galleryImageUrls")
+	@Mapping(target = "stats", source = "config.landing.stats")
+	@Mapping(target = "contact", source = "config.landing.contact")
+	@Mapping(target = "mapEmbedUrl", source = "config.landing.mapEmbedUrl")
+	@Mapping(target = "socialLinks", source = "config.landing.socialLinks")
+	@Mapping(target = "features", source = "features")
+	PublicSchoolResponse toPublicResponse(SchoolConfig config, PublicSchoolResponse.Features features);
 
 	// --- request -> document parts ---------------------------------------------------------------
 

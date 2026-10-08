@@ -2,6 +2,7 @@ package com.school.people.domain;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -66,6 +67,20 @@ public class Student {
 
 	/** Where the student sits in the current session. */
 	private Enrollment enrollment;
+
+	/**
+	 * The enrollments this one superseded, oldest first — one per session the student has been
+	 * promoted out of.
+	 *
+	 * <p>Only the promotion run appends to it, and nothing ever rewrites an entry: this is how "which
+	 * class was she in two years ago" stays answerable after the enrollment above has moved on, and
+	 * the report cards and invoices of past sessions are read against it.
+	 *
+	 * <p>A student who leaves or graduates keeps their last enrollment in {@link #enrollment} rather
+	 * than having it pushed here. Nothing superseded it, and a leaver's final class is the one thing
+	 * about them most often asked for.
+	 */
+	private List<Enrollment> enrollmentHistory;
 
 	private Guardians guardians;
 

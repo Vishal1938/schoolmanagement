@@ -1,5 +1,6 @@
 package com.school.people.infra;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -37,4 +38,24 @@ public interface StudentRepository extends MongoRepository<Student, String> {
 
 	boolean existsByEnrollmentSessionIdAndEnrollmentClassIdAndEnrollmentSectionAndEnrollmentRollNoAndIdNot(
 			String sessionId, String classId, String section, int rollNo, String id);
+
+	/**
+	 * Everybody enrolled in one session, whatever their class or status. The promotion run (B5 part 2)
+	 * uses it to find which (class, section, roll number) slots in the session it is promoting
+	 * <em>into</em> are already occupied, in one query rather than one per student.
+	 */
+	List<Student> findByEnrollmentSessionId(String sessionId);
+
+	/**
+	 * Which of these admission numbers are already taken. One query for a whole spreadsheet, so the
+	 * import (B5) does not issue a round trip per row.
+	 */
+	List<Student> findByAdmissionNoIn(Collection<String> admissionNos);
+
+	/**
+	 * The highest roll number in a section, whatever the holder's status, so the import can carry on
+	 * numbering from where the section left off. Empty for a section nobody is in yet.
+	 */
+	Optional<Student> findFirstByEnrollmentSessionIdAndEnrollmentClassIdAndEnrollmentSectionOrderByEnrollmentRollNoDesc(
+			String sessionId, String classId, String section);
 }

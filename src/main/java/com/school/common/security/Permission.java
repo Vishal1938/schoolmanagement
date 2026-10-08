@@ -29,6 +29,13 @@ public enum Permission {
 
 	EMPLOYEE_WRITE,
 
+	/**
+	 * Downloading the credentials workbook an Excel import produces. Separate from
+	 * {@code STUDENT_WRITE} and {@code EMPLOYEE_WRITE} because one file can hold both kinds of person,
+	 * and because what it holds is temporary passwords rather than records.
+	 */
+	IMPORT_CREDENTIALS_READ,
+
 	// --- attendance (B8) --------------------------------------------------------------------------
 
 	ATTENDANCE_MARK_STUDENT,
@@ -92,7 +99,15 @@ public enum Permission {
 
 	// --- quizzes (B15) ----------------------------------------------------------------------------
 
+	/** Setting quizzes, publishing them and reading their results. Held by an admin and a teacher. */
 	QUIZ_MANAGE,
+
+	/**
+	 * The same, for <em>anybody's</em> quiz. An admin holds this and a teacher does not, which is how
+	 * "a teacher only touches the quizzes they set" is asked as a permission rather than as a role —
+	 * the same shape as {@code NOTICE_WRITE_ALL} beside {@code NOTICE_WRITE_CLASS}.
+	 */
+	QUIZ_MANAGE_ALL,
 
 	QUIZ_ATTEMPT,
 

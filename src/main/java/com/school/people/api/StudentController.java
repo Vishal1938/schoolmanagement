@@ -3,6 +3,10 @@ package com.school.people.api;
 import com.school.common.fees.FeeStatus;
 import com.school.common.pagination.PageResponse;
 import com.school.common.security.HasPermission;
+import com.school.people.app.ImportCredentialsService;
+import com.school.people.app.ImportTemplates;
+import com.school.people.app.StudentImportService;
+import com.school.people.app.StudentPromotionService;
 import com.school.people.app.StudentSearch;
 import com.school.people.app.StudentService;
 import com.school.people.domain.Student;
@@ -12,7 +16,10 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -24,6 +31,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * Students.
@@ -38,9 +46,16 @@ import org.springframework.web.bind.annotation.RestController;
 public class StudentController {
 
 	private final StudentService students;
+	private final StudentImportService imports;
+	private final ImportTemplates templates;
+	private final StudentPromotionService promotions;
 
-	public StudentController(StudentService students) {
+	public StudentController(StudentService students, StudentImportService imports, ImportTemplates templates,
+			StudentPromotionService promotions) {
 		this.students = students;
+		this.imports = imports;
+		this.templates = templates;
+		this.promotions = promotions;
 	}
 
 	@GetMapping
@@ -113,5 +128,61 @@ public class StudentController {
 					+ "once; calling again issues another rather than repeating it.")
 	public TemporaryPasswordResponse resetPassword(@PathVariable String uniqueId) {
 		return new TemporaryPasswordResponse(uniqueId, students.resetPassword(uniqueId));
+	}
+
+	// --- bulk import ------------------------------------------------------------------------------
+
+	@GetMapping("/import/template")
+	@PreAuthorize(HasPermission.STUDENT_WRITE)
+	@Operation(summary = "Download the student import template",
+			description = "An .xlsx with the header row, one example row, an Instructions sheet, and "
+					+ "dropdowns for Gender, Class and Section filled in from this school's own academics. "
+					+ "Generated per request, so it is always current.")
+	public ResponseEntity<byte[]> importTemplate() {
+		return xlsx(templates.students(), "student-import-template.xlsx");
+	}
+
+	@PostMapping(path = "/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+	@PreAuthorize(HasPermission.STUDENT_WRITE)
+	@Operation(summary = "Import students from a filled-in template",
+			description = "Up to 5 MB of .xlsx. Every row is validated first: if any of them has a problem, "
+					+ "nothing at all is created and the response is {valid: false, errors: [{row, column, "
+					+ "message}]} with every bad cell listed. Otherwise each student is admitted exactly as "
+					+ "POST /students would, and the response carries the count and a credentialsFileId for "
+					+ "GET /imports/credentials/{id}. Both outcomes are 200.")
+	public ImportResult importStudents(@RequestParam("file") MultipartFile file) {
+		return imports.importStudents(file);
+	}
+
+	// --- promotion --------------------------------------------------------------------------------
+
+	@PostMapping("/promote/preview")
+	@PreAuthorize(HasPermission.STUDENT_WRITE)
+	@Operation(summary = "Preview a promotion",
+			description = "Who would move and where to, per mapping, with the students listed in section "
+					+ "and roll order. Writes nothing. A mapping with toClassId null is the final class, "
+					+ "whose students would graduate. excludeUniqueIds is ignored here — this is the list "
+					+ "the admin reads in order to decide who goes in it.")
+	public PromotionPreview previewPromotion(@Valid @RequestBody PromotionRequest request) {
+		return promotions.preview(request);
+	}
+
+	@PostMapping("/promote")
+	@PreAuthorize(HasPermission.STUDENT_WRITE)
+	@Operation(summary = "Promote students into the next session",
+			description = "Moves the ACTIVE students of each mapped class out of the active session and into "
+					+ "toSessionId, keeping their section and roll number and pushing the old enrollment "
+					+ "into the student's enrollment history. toClassId null marks that class ALUMNI; "
+					+ "students named in excludeUniqueIds stay in the same class in the new session. One "
+					+ "transaction per mapping. This does NOT change which session is active.")
+	public PromotionResult promote(@Valid @RequestBody PromotionRequest request) {
+		return promotions.promote(request);
+	}
+
+	private static ResponseEntity<byte[]> xlsx(byte[] bytes, String fileName) {
+		return ResponseEntity.ok()
+				.contentType(MediaType.parseMediaType(ImportCredentialsService.XLSX_CONTENT_TYPE))
+				.header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+				.body(bytes);
 	}
 }

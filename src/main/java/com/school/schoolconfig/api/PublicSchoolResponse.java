@@ -14,6 +14,8 @@ import java.util.Set;
  * <p>Never add here: the receipt prefix, the attendance edit window, working days, the grading
  * scheme, PDF footer text, the school code or any audit field.
  *
+ * <p>{@link Features} is the one member that is not configuration content; see its own note.
+ *
  * <p>Only {@code name} is certain to be present. Everything else is optional in the configuration, so
  * a landing page must treat every field as possibly absent; the response omits nulls rather than
  * sending them.
@@ -34,13 +36,28 @@ public record PublicSchoolResponse(
 		Stats stats,
 		Contact contact,
 		String mapEmbedUrl,
-		SocialLinks socialLinks) {
+		SocialLinks socialLinks,
+		Features features) {
 
 	/** The complete set of top-level keys this response may ever serialise. */
 	public static final Set<String> FIELDS = Set.of(
 			"name", "tagline", "logoUrl", "faviconUrl", "theme", "about", "vision", "principal",
 			"academics", "highlights", "facilities", "galleryImageUrls", "stats", "contact",
-			"mapEmbedUrl", "socialLinks");
+			"mapEmbedUrl", "socialLinks", "features");
+
+	/**
+	 * Which optional features this deployment has, so the frontend can decide what to render before
+	 * it calls anything.
+	 *
+	 * <p>The one key that does not come from {@code school_config}: it is an environment switch, not
+	 * content. Always present, unlike every other field here, because "absent" would be
+	 * indistinguishable from "off" and a client would have to guess.
+	 *
+	 * @param ai whether the AI endpoints exist in this deployment. False means every one of them
+	 *           answers 404 {@code FEATURE_DISABLED}, so hide the chat bubble rather than calling it
+	 */
+	public record Features(boolean ai) {
+	}
 
 	public record Theme(String primary, String secondary, String accent) {
 	}
