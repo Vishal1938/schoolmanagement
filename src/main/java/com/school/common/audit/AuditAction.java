@@ -74,6 +74,20 @@ public enum AuditAction {
 	/** ACTIVE, LEFT or ALUMNI. Separate from a plain update, because it is what reports filter on. */
 	STUDENT_STATUS_CHANGED,
 
+	/**
+	 * A spreadsheet of students was imported. {@code after} holds the count only — each student also
+	 * has their own {@link #STUDENT_CREATED} entry, and the temporary passwords the import issued are
+	 * never recorded anywhere.
+	 */
+	STUDENTS_IMPORTED,
+
+	/**
+	 * One class was promoted into the next session. Written inside the same transaction as the
+	 * enrollments it describes — one entry per mapping, not one per run — so the trail can neither
+	 * claim a promotion that rolled back nor miss one that committed. {@code after} holds the counts.
+	 */
+	STUDENTS_PROMOTED,
+
 	// --- employees (B6) -------------------------------------------------------------------------
 
 	/** A teacher or staff member was taken on, with their login where they get one. */
@@ -87,6 +101,9 @@ public enum AuditAction {
 
 	/** Local-profile back-filling of employee records for logins that already existed. */
 	EMPLOYEES_SEEDED,
+
+	/** A spreadsheet of employees was imported; the count only, as for {@link #STUDENTS_IMPORTED}. */
+	EMPLOYEES_IMPORTED,
 
 	// --- attendance (B8) ------------------------------------------------------------------------
 
@@ -112,6 +129,28 @@ public enum AuditAction {
 	/** A subject's marks were entered or corrected for one class-section. */
 	MARKS_ENTERED,
 
+	// --- exam paper vault (B14) -----------------------------------------------------------------
+
+	/**
+	 * A question paper was put in the vault. {@code after} holds the paper and the version that was
+	 * stored, never the storage key: the key is not a secret the trail needs, and the trail is read by
+	 * more people than the vault.
+	 */
+	EXAM_PAPER_UPLOADED,
+
+	/** A further version of a paper already in the vault, with its {@code versionNo} in {@code after}. */
+	EXAM_PAPER_VERSION_ADDED,
+
+	/** A paper's {@code releaseAt} moved, so who may read it when changed. */
+	EXAM_PAPER_RELEASE_CHANGED,
+
+	/**
+	 * A download link was issued for one version of a paper. This is the entry CLAUDE.md asks for on
+	 * exam-paper access: it is written when the pre-signed URL is handed out, which is the moment
+	 * access was granted, and the detail names the version.
+	 */
+	EXAM_PAPER_DOWNLOADED,
+
 	// --- notices (B10) --------------------------------------------------------------------------
 
 	NOTICE_CREATED,
@@ -120,6 +159,25 @@ public enum AuditAction {
 
 	/** The notice as it was is kept in {@code before}, so a deletion by mistake is recoverable. */
 	NOTICE_DELETED,
+
+	// --- quizzes (B15) --------------------------------------------------------------------------
+
+	QUIZ_CREATED,
+
+	/** A draft was rewritten. Only a draft can be: publishing freezes the question set. */
+	QUIZ_UPDATED,
+
+	/**
+	 * A quiz became sittable. {@code after} is the whole quiz, answer key included — this is the entry
+	 * that says what the class was actually asked, and it is in the one collection a student cannot read.
+	 */
+	QUIZ_PUBLISHED,
+
+	/** A quiz was stopped. No new attempts; the ones in flight run to their own deadline. */
+	QUIZ_CLOSED,
+
+	/** The quiz as it was is kept in {@code before}. Only a draft reaches here. */
+	QUIZ_DELETED,
 
 	// --- fees (B11) -----------------------------------------------------------------------------
 

@@ -29,6 +29,7 @@ public record AppProperties(
 		@DefaultValue Razorpay razorpay,
 		@DefaultValue BootstrapAdmin bootstrapAdmin,
 		@DefaultValue Encryption encryption,
+		@DefaultValue Ai ai,
 		@DefaultValue Seed seed) {
 
 	/** Feature switches. AI stays off unless explicitly enabled (B18). */
@@ -61,6 +62,7 @@ public record AppProperties(
 	 *                       {@code endpoint/bucket} is used, which is what MinIO serves locally.
 	 * @param maxImageSize      per-file limit for image uploads, below the multipart transport limit
 	 * @param maxAttachmentSize per-file limit for notice attachments (B10), likewise below it
+	 * @param maxPaperSize      per-file limit for exam papers in the vault (B14), likewise below it
 	 */
 	public record Storage(
 			String endpoint,
@@ -72,7 +74,8 @@ public record AppProperties(
 			@DefaultValue("true") boolean pathStyleAccess,
 			String publicBaseUrl,
 			@DefaultValue("5MB") DataSize maxImageSize,
-			@DefaultValue("10MB") DataSize maxAttachmentSize) {
+			@DefaultValue("10MB") DataSize maxAttachmentSize,
+			@DefaultValue("20MB") DataSize maxPaperSize) {
 
 		/** Base URL for public objects, without a trailing slash. */
 		public String resolvedPublicBaseUrl() {
@@ -93,6 +96,29 @@ public record AppProperties(
 
 	/** Base64 AES key for field-level encryption of employee bank details (B6). */
 	public record Encryption(String key) {
+	}
+
+	/**
+	 * The AI provider's credentials and model (B18). Read only when {@link Features#ai()} is true, so
+	 * a school that has the feature off needs no key and starts without one.
+	 *
+	 * <p>There is no {@code provider} switch. OpenAI is the one starter on the classpath; moving to
+	 * another provider means swapping that dependency and {@code AiModelConfig}, which a property
+	 * could not do on its own.
+	 *
+	 * @param apiKey  from {@code AI_API_KEY}. Never logged, never returned by any endpoint
+	 * @param model   from {@code AI_MODEL}; the provider's model id, not a friendly name
+	 * @param timeout how long one provider call may take before it is a 502 {@code DEPENDENCY_FAILED}
+	 */
+	public record Ai(
+			String apiKey,
+			@DefaultValue("gpt-4o-mini") @NotBlank String model,
+			@DefaultValue("30s") Duration timeout) {
+
+		/** Whether a key has been configured at all. */
+		public boolean hasApiKey() {
+			return apiKey != null && !apiKey.isBlank();
+		}
 	}
 
 	/**

@@ -21,4 +21,11 @@ public interface StudentAttendanceRepository extends MongoRepository<StudentAtte
 	 */
 	List<StudentAttendance> findByEntriesStudentUniqueIdAndDateBetweenOrderByDateAsc(
 			String studentUniqueId, LocalDate from, LocalDate to);
+
+	/**
+	 * Every register of a class in the range, all sections. Served by the {@code classId} prefix of
+	 * the class-section-date index. For the whole-class percentages in B18, which would otherwise be
+	 * one query per child.
+	 */
+	List<StudentAttendance> findByClassIdAndDateBetween(String classId, LocalDate from, LocalDate to);
 }

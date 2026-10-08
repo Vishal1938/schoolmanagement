@@ -94,6 +94,21 @@ public class NoticeService {
 		return page(new Criteria().andOperator(withinWindow(now), Criteria.where("isPublic").is(true)), pageable);
 	}
 
+	/**
+	 * The most recent public notices, reduced to what another module may read (B18).
+	 *
+	 * <p>No caller check: every one of these is already published to the internet by
+	 * {@code GET /public/notices}, so there is nothing here an anonymous visitor could not fetch
+	 * themselves. Pinned first then newest, the same order the landing page shows.
+	 *
+	 * @param limit how many to take, at most 20 — this ends up in a prompt, not on a page
+	 */
+	public List<PublicNoticeBrief> latestPublic(int limit) {
+		return publicFeed(PageRequest.of(0, Math.clamp(limit, 1, 20))).getContent().stream()
+				.map(notice -> new PublicNoticeBrief(notice.getTitle(), notice.getBody(), notice.getPublishAt()))
+				.toList();
+	}
+
 	/** Published and not yet expired. An absent {@code expiresAt} never expires. */
 	private static Criteria withinWindow(Instant now) {
 		return new Criteria().andOperator(

@@ -2,11 +2,13 @@ package com.school.exams.app;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import com.school.academics.app.AcademicContext;
@@ -129,6 +131,123 @@ public class ResultService {
 	public record StudentExamResult(StudentRef student, SchoolClass schoolClass, Exam exam, ExamResult result) {
 	}
 
+	// --- what leaves the module (B18) -------------------------------------------------------------
+
+	/**
+	 * Which session an exam belongs to.
+	 *
+	 * <p>For a caller that holds an exam id and nothing else — the AI report remark is asked for by
+	 * exam, and then has to look up the same student's earlier exams in that exam's year rather than
+	 * in whatever year happens to be current.
+	 */
+	public String sessionOfExam(String examId) {
+		return exams.get(examId).getSessionId();
+	}
+
+	/**
+	 * One student's results in the PUBLISHED exams of a session, oldest exam first.
+	 *
+	 * <p>PUBLISHED only, for an admin as much as for the student, and for the same reason
+	 * {@link #forStudentExam} is: an exam still in marks entry has no result to state. Oldest first
+	 * is what makes "the previous exam" meaningful — see {@link StudentExamScore#lastPaperOn()}.
+	 *
+	 * @param sessionId null or blank for the current session
+	 */
+	public List<StudentExamScore> publishedScores(String uniqueId, String sessionId) {
+		StudentRef student = students.requireRef(uniqueId);
+		requireMayRead(student);
+
+		Map<String, String> subjectNames = subjectNames();
+		return publishedExams(sessionId, student.classId()).stream()
+				.map(exam -> scoreOf(exam, marksOf(exam.getId(), student.uniqueId()), subjectNames))
+				.toList();
+	}
+
+	/**
+	 * The same, for every ACTIVE student of one class at once, keyed by unique id.
+	 *
+	 * <p>One marks read per exam rather than one per student per exam, which is the difference
+	 * between a school-wide scan being usable and not: B18's insights endpoint walks every class.
+	 * A student with no marks at all still gets a list — of zeroes — because an unmarked paper is
+	 * part of what the flags are looking for.
+	 *
+	 * @param sessionId null or blank for the current session
+	 */
+	public Map<String, List<StudentExamScore>> publishedScoresByClass(String sessionId, String classId) {
+		requireStaffRead();
+
+		String session = sessionId == null || sessionId.isBlank() ? academicContext.currentSessionId() : sessionId;
+		List<StudentRef> roll = students.activeInClass(session, classId);
+		if (roll.isEmpty()) {
+			return Map.of();
+		}
+
+		Map<String, String> subjectNames = subjectNames();
+		Map<String, List<StudentExamScore>> byStudent = new LinkedHashMap<>();
+		roll.forEach(student -> byStudent.put(student.uniqueId(), new ArrayList<>()));
+		for (Exam exam : publishedExams(session, classId)) {
+			Map<String, Map<String, Mark>> marksByStudent = marksByStudent(exam.getId(), roll);
+			roll.forEach(student -> byStudent.get(student.uniqueId())
+					.add(scoreOf(exam, marksByStudent.getOrDefault(student.uniqueId(), Map.of()), subjectNames)));
+		}
+		return byStudent;
+	}
+
+	/** The session's published exams for a class, oldest last paper first. */
+	private List<Exam> publishedExams(String sessionId, String classId) {
+		return exams.list(sessionId, classId).stream()
+				.filter(exam -> exam.getStatus() == ExamStatus.PUBLISHED)
+				.sorted(Comparator.comparing(ResultService::lastPaperOn,
+						Comparator.nullsFirst(Comparator.naturalOrder())))
+				.toList();
+	}
+
+	/**
+	 * When the last paper of an exam was sat, which is the only chronology an exam has: the schedule
+	 * carries the dates and the exam itself only carries a name.
+	 */
+	private static LocalDate lastPaperOn(Exam exam) {
+		return schedule(exam).stream()
+				.map(ExamSubject::date)
+				.filter(Objects::nonNull)
+				.max(Comparator.naturalOrder())
+				.orElse(null);
+	}
+
+	private StudentExamScore scoreOf(Exam exam, Map<String, Mark> bySubject, Map<String, String> subjectNames) {
+		Scored scored = score(exam, bySubject);
+		List<StudentExamScore.SubjectScore> subjectScores = new ArrayList<>();
+		for (ExamSubject paper : schedule(exam)) {
+			Mark mark = bySubject.get(paper.subjectId());
+			Integer obtained = mark == null || mark.isAbsent() ? null : mark.getMarksObtained();
+			subjectScores.add(new StudentExamScore.SubjectScore(
+					subjectNames.get(paper.subjectId()),
+					obtained,
+					paper.maxMarks(),
+					obtained == null ? null : gradeLabel(percentageOf(obtained, paper.maxMarks())),
+					obtained != null && obtained >= paper.passMarks(),
+					mark != null && mark.isAbsent()));
+		}
+		GradeBand band = bandFor(floorPercentage(scored.total(), scored.maxTotal()));
+		return new StudentExamScore(exam.getId(), exam.getName(), lastPaperOn(exam),
+				percentage(scored.total(), scored.maxTotal()), band == null ? null : band.grade(),
+				scored.outcome() == ResultOutcome.PASS, subjectScores);
+	}
+
+	private Map<String, Mark> marksOf(String examId, String studentUniqueId) {
+		return marks.findByExamIdAndStudentUniqueId(examId, studentUniqueId).stream()
+				.collect(Collectors.toMap(Mark::getSubjectId, mark -> mark, (first, second) -> first));
+	}
+
+	/** Reading a whole class is staff-only; there is no "my own" reading of somebody else's roll. */
+	private void requireStaffRead() {
+		AuthPrincipal caller = CurrentUser.require();
+		if (!caller.permissions().contains(Permission.STUDENT_READ_BASIC)
+				&& !caller.permissions().contains(Permission.STUDENT_READ_FULL)) {
+			throw new ForbiddenException("You may not read a whole class's results");
+		}
+	}
+
 	/**
 	 * An admin or a teacher may read any student's results; a student may read only their own.
 	 *
@@ -146,8 +265,7 @@ public class ResultService {
 
 	/** One student's result in one exam, including their rank within their class-section. */
 	private ExamResult resultFor(Exam exam, StudentRef student, Map<String, String> subjectNames) {
-		Map<String, Mark> bySubject = marks.findByExamIdAndStudentUniqueId(exam.getId(), student.uniqueId()).stream()
-				.collect(Collectors.toMap(Mark::getSubjectId, mark -> mark, (first, second) -> first));
+		Map<String, Mark> bySubject = marksOf(exam.getId(), student.uniqueId());
 		Scored scored = score(exam, bySubject);
 
 		List<ExamResult.SubjectResult> subjectResults = new ArrayList<>();

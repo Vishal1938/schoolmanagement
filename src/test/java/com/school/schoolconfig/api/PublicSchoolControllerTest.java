@@ -9,6 +9,7 @@ import java.util.Map;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.school.common.config.AppProperties;
 import com.school.common.exceptions.GlobalExceptionHandler;
 import com.school.common.exceptions.NotFoundException;
 import com.school.common.exceptions.ProblemDetailFactory;
@@ -53,7 +54,11 @@ class PublicSchoolControllerTest {
 				// Boot's auto-configured mapper adds this; without it a ProblemDetail's code and timestamp
 				// would serialise nested under "properties" instead of at the top level.
 				.addMixIn(ProblemDetail.class, ProblemDetailJacksonMixin.class);
-		mockMvc = MockMvcBuilders.standaloneSetup(new PublicSchoolController(service, SchoolConfigFixtures.MAPPER))
+		// Only app.features is read, and only to fill in the `features` key.
+		AppProperties properties = mock(AppProperties.class);
+		when(properties.features()).thenReturn(new AppProperties.Features(false));
+		mockMvc = MockMvcBuilders
+				.standaloneSetup(new PublicSchoolController(service, SchoolConfigFixtures.MAPPER, properties))
 				.setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
 				.setControllerAdvice(new GlobalExceptionHandler(
 						new ProblemDetailFactory(Clock.fixed(NOW, ZoneId.of("Asia/Kolkata")))))

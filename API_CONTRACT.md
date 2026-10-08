@@ -131,6 +131,7 @@ name exactly as written here. ADMIN holds all of them; the other three hold what
 | `STUDENT_WRITE` | | | | Create, update and promote students |
 | `EMPLOYEE_READ` | | | | Read employee records |
 | `EMPLOYEE_WRITE` | | | | Create and update employees |
+| `IMPORT_CREDENTIALS_READ` | | | | Download the credentials file an Excel import produced |
 | `ATTENDANCE_MARK_STUDENT` | ✓ | | | Mark student attendance, within the configured edit window |
 | `ATTENDANCE_MARK_EMPLOYEE` | | | | Mark employee attendance |
 | `ATTENDANCE_CORRECT_ANY` | | | | Correct a register after the edit window has closed |
@@ -138,8 +139,8 @@ name exactly as written here. ADMIN holds all of them; the other three hold what
 | `MARKS_WRITE` | ✓ | | | Enter and update marks until the exam is published |
 | `MARKS_READ_SELF` | | ✓ | | Read one's own marks and report cards |
 | `EXAM_MANAGE` | | | | Create exams and move them through their statuses |
-| `EXAM_PAPER_UPLOAD` | ✓ | | | Upload to the exam-paper vault |
-| `EXAM_PAPER_READ` | ✓ | | | Download from the vault; 423 before `releaseAt` for teachers |
+| `EXAM_PAPER_UPLOAD` | ✓ | | | Upload to the exam-paper vault, and move the release time of one's own paper |
+| `EXAM_PAPER_READ` | ✓ | | | List the vault and download from it; 423 before `releaseAt` for teachers who did not upload it |
 | `FEE_MANAGE` | | | | Fee heads, structures, invoices, concessions, offline payments |
 | `FEE_READ_FULL` | | | | Invoices and amounts for any student |
 | `FEE_READ_STATUS` | ✓ | ✓ | | The derived status only (`PAID`/`DUE`/`PARTIAL`/`OVERDUE`), no amounts |
@@ -149,12 +150,13 @@ name exactly as written here. ADMIN holds all of them; the other three hold what
 | `NOTICE_WRITE_ALL` | | | | Write a notice for any audience, and make one public or pinned |
 | `NOTICE_WRITE_CLASS` | ✓ | | | Write `CLASS` notices, and edit or delete one's own |
 | `NOTICE_READ` | ✓ | ✓ | ✓ | Read notices for one's own audience, and download their attachments |
-| `QUIZ_MANAGE` | ✓ | | | Create quizzes and read results |
+| `QUIZ_MANAGE` | ✓ | | | Set quizzes, publish them and read their results |
+| `QUIZ_MANAGE_ALL` | | | | The same for *anybody's* quiz; without it a teacher is held to their own |
 | `QUIZ_ATTEMPT` | | ✓ | | Attempt a quiz |
 | `ACADEMICS_MANAGE` | | | | Create and edit sessions, classes, subjects and teaching assignments |
 | `SCHOOL_CONFIG_MANAGE` | | | | Read and replace the school configuration |
 | `DASHBOARD_ADMIN` | | | | The admin dashboard aggregates |
-| `AUDIT_READ` | | | | Read the audit trail |
+| `AUDIT_READ` | | | | Read the audit trail, including one exam paper's access log |
 | `AI_USE` | ✓ | | | The AI endpoints, additionally gated by `app.features.ai` |
 
 A permission is coarse — "may enter marks at all". Object-level rules, such as a teacher only reaching
@@ -218,7 +220,8 @@ satisfy RFC 7807. Individual errors may carry extra members beyond the table (fo
 | `RATE_LIMITED` | 429 | Too many requests; may carry `retryAfterSeconds`. |
 | `INTERNAL_ERROR` | 500 | Unhandled server failure. Carries `errorId`; body never exposes internals. |
 | `DEPENDENCY_FAILED` | 502 | An upstream call failed — Razorpay, S3/MinIO, SMTP, the AI provider. |
-| `FEATURE_DISABLED` | 503 | The endpoint is behind a feature flag that is off in this deployment, e.g. `app.features.ai`. |
+| `FEATURE_DISABLED` | 503 | The endpoint exists but is behind a feature flag that is off in this deployment, e.g. online payment when no gateway is configured. |
+| `FEATURE_DISABLED` | 404 | **Same code, 404 status.** The endpoint is behind a flag that is off and the route is meant to look absent — every `/ai` and `/public/ai` path when `app.features.ai` is false. Read `features` on `GET /public/school` and do not call them at all. |
 
 Codes are additive: the frontend must have a fallback branch for a code it does not know.
 
@@ -289,11 +292,12 @@ The `Who` column gives access. "Self" means the user's own records only.
     "email": "office@example", "websiteUrl": "https://example"
   },
   "mapEmbedUrl": "https://www.google.com/maps/embed?pb=...",
-  "socialLinks": { "facebook": "...", "instagram": "...", "youtube": "...", "twitter": null, "linkedin": null }
+  "socialLinks": { "facebook": "...", "instagram": "...", "youtube": "...", "twitter": null, "linkedin": null },
+  "features": { "ai": false }
 }
 ```
 
-**Only `name`, `about`, `theme`, `stats` and `contact` are always present. Everything else is
+**Only `name`, `about`, `theme`, `stats`, `contact` and `features` are always present. Everything else is
 optional and the key is omitted when the school has not filled it in** — including whole objects
 (`principal`, `academics`) and whole arrays (`highlights`, `facilities`, `galleryImageUrls`). Fields
 *inside* an optional object are independently optional too: a `principal` with only a `message` and no
@@ -302,6 +306,8 @@ content is missing, so render every section conditionally rather than assuming a
 
 | Field | Notes |
 |---|---|
+| `features` | Which optional features this deployment has. **Always present**, and the only object here that is not school content — it comes from the deployment's environment, not from `school_config`. Treat an unknown key inside it as absent-and-off. |
+| `features.ai` | `false` means every `/ai` and `/public/ai` endpoint answers 404 `FEATURE_DISABLED` in this deployment. Hide the AI entry points rather than calling them and handling the error. |
 | `vision` | The school's vision statement. |
 | `principal` | `{name, designation, photoUrl, message}`, all optional. `designation` is what to print under the name (`Principal`, `Director`, …). |
 | `academics` | `{board, summary, levels}` — public, descriptive copy. `board` is worded by the school, not a code. |
@@ -414,9 +420,10 @@ assignability is checked against the login, and the two stay in step because an 
 | PUT | `/students/{uniqueId}` | `STUDENT_WRITE` (ADMIN) |
 | PATCH | `/students/{uniqueId}/status` | `STUDENT_WRITE` (ADMIN). `ACTIVE`, `LEFT`, `ALUMNI` |
 | POST | `/students/{uniqueId}/reset-password` | `STUDENT_WRITE` (ADMIN) |
-| POST | `/students/import` (multipart .xlsx) | ADMIN. Returns `{created, failed: [{row, errors}]}` — **not built yet** |
-| GET | `/students/import/template` | ADMIN. Downloads the .xlsx template — **not built yet** |
-| POST | `/students/promote` | ADMIN. Bulk promotion to the next session/class — **not built yet** |
+| GET | `/students/import/template` | `STUDENT_WRITE` (ADMIN). Downloads the .xlsx template |
+| POST | `/students/import` (multipart .xlsx) | `STUDENT_WRITE` (ADMIN). See [Bulk import](#bulk-import) |
+| POST | `/students/promote/preview` | `STUDENT_WRITE` (ADMIN). See [Promotion](#promotion) |
+| POST | `/students/promote` | `STUDENT_WRITE` (ADMIN). See [Promotion](#promotion) |
 
 A student is addressed by `uniqueId` (`DEMO-STU-26-00142`), never by the Mongo `id`, and the
 `uniqueId` never changes. Students are **never deleted** — marks, invoices and receipts point at
@@ -492,6 +499,86 @@ a student also renames their login, so `/auth/me` agrees. `PATCH …/status` tak
 
 Create, update, status change and password reset are all written to `audit_logs`.
 
+### Promotion
+| Method | Path | Who |
+|---|---|---|
+| POST | `/students/promote/preview` | `STUDENT_WRITE` (ADMIN). Writes nothing |
+| POST | `/students/promote` | `STUDENT_WRITE` (ADMIN) |
+
+Moving the school up a year. Both endpoints take the same body, so the client can send back exactly
+what it previewed:
+
+```json
+{ "toSessionId": "66f1...",
+  "mappings": [ { "fromClassId": "66a1...", "toClassId": "66a2..." },
+                { "fromClassId": "66a2...", "toClassId": "66a3..." },
+                { "fromClassId": "66a9...", "toClassId": null } ],
+  "excludeUniqueIds": ["DEMO-STU-26-00142"] }
+```
+
+- The session promoted **out of** is always the **active** one and is not in the body — naming it
+  would let a run be fired at a year that closed two years ago.
+- `toClassId: null` is the **final class**: those students have finished school.
+- A class not listed in `mappings` is left alone. Listing one twice is 400.
+- `excludeUniqueIds` are the students **held back**. The preview ignores it; it is the list the admin
+  reads in order to decide who goes in it.
+
+**`POST /students/promote/preview`** resolves the sessions and classes and returns who would move:
+
+```json
+{ "fromSessionId": "...", "fromSessionName": "2026-27",
+  "toSessionId": "...", "toSessionName": "2027-28", "totalStudents": 412,
+  "mappings": [ { "fromClassId": "...", "fromClassName": "Class 5",
+                  "toClassId": "...", "toClassName": "Class 6", "graduating": false,
+                  "studentCount": 38,
+                  "students": [ { "uniqueId": "DEMO-STU-26-00142", "name": "Aarav Sharma",
+                                  "section": "A", "rollNo": 12 } ] } ] }
+```
+
+Students are the **ACTIVE** ones of that class in the active session, in section then roll order.
+`LEFT` and `ALUMNI` students are never touched by either endpoint.
+
+**`POST /students/promote`** → `{ "promoted": 374, "heldBack": 3, "graduated": 35 }`.
+
+Per student:
+
+| Case | What happens |
+|---|---|
+| Normal | Old enrollment pushed onto `enrollmentHistory`; new enrollment `{toSessionId, toClassId, same section, same rollNo}` |
+| In `excludeUniqueIds` | Same, but the class does not change: `{toSessionId, fromClassId, same section, same rollNo}` |
+| `toClassId: null` | `status: ALUMNI`. The enrollment is **left as it is** and nothing goes into the history — nothing superseded it, and a leaver's final class is what gets asked for |
+
+**It does not change which session is active.** Promotion fills the new session's enrollments;
+activating it is a separate `POST /sessions/{id}/activate` the admin makes once the result looks
+right. Until then every other module carries on reading the old year, which is what makes this safe
+to run early.
+
+**One transaction per mapping**, not one for the whole run: a single transaction over two thousand
+students holds a long lock on the busiest collection and can exceed MongoDB's 16 MB oplog entry
+limit. Each class therefore lands or does not land on its own. A run that fails halfway is resumed
+by sending the remaining mappings again — the classes already moved are no longer in the old
+session, so they are simply not found a second time.
+
+**Rejections**, all 400 `VALIDATION_ERROR` with every problem listed at once, and all checked
+*before* the first class moves:
+- `toSessionId` does not exist, or **is the current session**.
+- A `fromClassId` or `toClassId` that is not a class, or a `fromClassId` mapped twice.
+- A student's section does not exist on the class they would land in — 5-C into a Class 6 that only
+  has A and B.
+- Two students would land on the same (class, section, roll number), which happens as soon as two
+  classes merge into one, or when somebody held back in 6-A keeps a roll number an arriving 5-A
+  student also has. Enrollments already in the target session count as taken, so resuming a partial
+  run cannot drop a student on top of one that already moved. The `field` of these violations is the
+  student's `uniqueId`.
+- A `uniqueId` in `excludeUniqueIds` that is not an active student in any class being promoted —
+  otherwise a typo silently promotes the student it was meant to hold back.
+
+422 `UNPROCESSABLE` if no session is active at all.
+
+**Audit.** One `STUDENTS_PROMOTED` entry **per mapping**, written inside that mapping's transaction
+with that class's counts — so the trail can neither claim a promotion that rolled back nor miss one
+that committed. The run totals are in the response.
+
 ### Employees (teachers + staff)
 | Method | Path | Who |
 |---|---|---|
@@ -503,7 +590,8 @@ Create, update, status change and password reset are all written to `audit_logs`
 | PATCH | `/employees/{uniqueId}/status` | `EMPLOYEE_WRITE` (ADMIN). `ACTIVE`, `LEFT` |
 | POST | `/employees/{uniqueId}/reset-password` | `EMPLOYEE_WRITE` (ADMIN) |
 | GET | `/users/teachers` | any authenticated user. The teacher picker: `[{uniqueId, name}]` |
-| POST | `/employees/import` | ADMIN — **not built yet** |
+| GET | `/employees/import/template` | `EMPLOYEE_WRITE` (ADMIN). Downloads the .xlsx template |
+| POST | `/employees/import` (multipart .xlsx) | `EMPLOYEE_WRITE` (ADMIN). See [Bulk import](#bulk-import) |
 
 Teachers and staff are one collection. `employeeType` is `TEACHER` or `STAFF` and decides which half
 of the record is live — the other half is **cleared, not rejected**, so changing a teacher to staff
@@ -566,6 +654,102 @@ too; ask for `status=ACTIVE` explicitly. Default sort is by name.
 directory** — `employeeType: TEACHER` with `status: ACTIVE` — rather than the login table.
 
 Create, update, status change and password reset are all written to `audit_logs`.
+
+### Bulk import
+| Method | Path | Who |
+|---|---|---|
+| GET | `/students/import/template` | `STUDENT_WRITE` (ADMIN) |
+| POST | `/students/import` | `STUDENT_WRITE` (ADMIN) |
+| GET | `/employees/import/template` | `EMPLOYEE_WRITE` (ADMIN) |
+| POST | `/employees/import` | `EMPLOYEE_WRITE` (ADMIN) |
+| GET | `/imports/credentials/{id}` | `IMPORT_CREDENTIALS_READ` (ADMIN) |
+
+Students and employees import the same way, so this section covers both.
+
+**Templates.** `GET …/import/template` returns an `.xlsx` as
+`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, with a
+`Content-Disposition: attachment`. It is **generated per request from this school's own data**, not a
+static file: the Class, Section and Subject lists in it are whatever the academics module currently
+holds. Each template has the data sheet first — a bold frozen header row and one example row — and a
+second sheet, `Instructions`, carrying the written rules and the allowed values the dropdowns point
+at. Dropdowns are attached to Gender, Class and Section (students) and Type, Gender and Can Login
+(employees). The columns holding digit strings are formatted as text, so Excel does not turn a phone
+number into `9.87654E+09`.
+
+The Section dropdown lists **every section in the school**, because one validation rule cannot depend
+on the class chosen two cells to the left. The server checks that the section actually belongs to the
+class.
+
+Student columns, in order — `*` means required:
+
+`Name*`, `DOB*`, `Gender*`, `Class*`, `Section*`, `Roll No`, `Admission No`, `Admission Date`,
+`Father Name`, `Mother Name`, `Guardian Phone*`, `Alternate Phone`, `Email`, `Address`, `Blood Group`,
+`Previous School`
+
+Employee columns:
+
+`Type*`, `Name*`, `DOB`, `Gender`, `Phone*`, `Email`, `Joining Date*`, `Designation`, `Qualification`,
+`Subjects`, `Can Login`, `Bank Account Name`, `Account Number`, `IFSC`, `Bank Name`
+
+**Reading the file.** Multipart, field name `file`, at most **5 MB** and **1000 data rows**. Every cell
+is read as text, so a ten-digit phone number keeps all ten digits whatever Excel stored it as. Dates
+are accepted either as real Excel dates or as `DD-MM-YYYY` text (`/` and `.` work as separators too).
+Columns are matched by **header text, not position** — reordering them, or deleting the `*`, still
+works. Rows whose every cell is blank are skipped.
+
+**Validation is all-or-nothing.** The whole file is checked before a single record is written:
+required fields, date formats, the class and section existing in the active session, subject names
+existing, phone numbers being exactly 10 digits, and admission numbers being unique both in the file
+and in the database. If **any** row has a problem, **nothing is created** and the response lists every
+bad cell at once — 200, not an error, because a spreadsheet with mistakes in it is a normal answer
+here and the per-cell detail does not fit `ProblemDetail`:
+
+```json
+{ "valid": false,
+  "errors": [
+    { "row": 4, "column": "DOB*", "message": "must be a date in DD-MM-YYYY format, e.g. 14-06-2015" },
+    { "row": 7, "column": "Section*", "message": "Class 1 has no section D" },
+    { "row": 9, "column": "Guardian Phone*", "message": "must be a 10-digit phone number" }
+  ] }
+```
+
+`row` is the row number **as Excel shows it**: the header is 1 and the first record is 2. `column` is
+the header text exactly as the template writes it.
+
+When every row is clean, each one is created through the same service the single-create endpoint
+uses — same ID series, same login, same per-record audit entry — inside one transaction:
+
+```json
+{ "valid": true, "created": 42, "credentialsFileId": "6f1c0b2e-9a44-4f0e-8d31-2b7c5ad0e913" }
+```
+
+A malformed upload — not an `.xlsx`, empty, or over 5 MB — is a normal 400 `VALIDATION_ERROR` in the
+usual error shape, since there are no rows to report against. 422 `UNPROCESSABLE` if no academic
+session is active.
+
+**Defaults the student import fills in.** `Roll No` blank → the next free number in that section,
+carrying on from the highest already there and skipping anything the file claimed explicitly.
+`Admission No` blank → a generated `ADM-26-00001`. `Admission Date` blank → the day of the import.
+
+**Type-specific columns in the employee import** are *ignored, not rejected*, exactly as
+`PUT /employees/{uniqueId}` ignores them: `Qualification` and `Subjects` apply to a `TEACHER`,
+`Designation` and `Can Login` to a `STAFF` member. A teacher always gets a login whatever `Can Login`
+says; a staff member gets one only on `YES`. `Subjects` is a comma-separated list of subject **names**
+as they appear on the Instructions sheet — an unknown name is an error, never a new subject. The bank
+columns are optional as a block, but giving any of them without a 6–20 digit `Account Number` is an
+error.
+
+**Credentials file.** `credentialsFileId` points at an `.xlsx` of `Name`, `Class/Type`, `Unique ID`
+and `Temporary Password` — the one and only copy of the passwords the import issued, since they are
+not in this response and, as everywhere else, are never logged or audited. `GET
+/imports/credentials/{id}` streams it back with `Cache-Control: no-store`. It is stored privately,
+never at a public URL, and a **scheduled job deletes it 24 hours after the import**, after which that
+endpoint is 404. `credentialsFileId` is `null` when the import created no logins at all — a file of
+staff who are all `Can Login = NO`.
+
+**Audit.** One `STUDENTS_IMPORTED` or `EMPLOYEES_IMPORTED` entry per import, holding the **counts
+only** and the credentials file id; each imported person also gets their own `STUDENT_CREATED` /
+`EMPLOYEE_CREATED` entry. No password reaches the trail.
 
 ### Member search
 | Method | Path | Who |
@@ -742,19 +926,162 @@ Marks entry and every status change are written to `audit_logs`.
 ### Exam papers (vault)
 | Method | Path | Who |
 |---|---|---|
-| POST | `/exam-papers` (multipart) | ADMIN, TEACHER. Fields: examId, subjectId, classId, `releaseAt` |
-| GET | `/exam-papers?examId=` | ADMIN, TEACHER. Returns metadata only |
-| GET | `/exam-papers/{id}/download` | ADMIN at any time; TEACHER only after `releaseAt`. Otherwise 423 `locked-resource`. Returns a 5-minute pre-signed URL. Every access is audited |
+| GET | `/exam-papers?examId=&classId=` | `EXAM_PAPER_READ` (ADMIN, TEACHER). Metadata only |
+| POST | `/exam-papers` (multipart) | `EXAM_PAPER_UPLOAD` (ADMIN, TEACHER). Fields: `file`, `examId`, `classId`, `subjectId`, `releaseAt`, optional `title` |
+| PUT | `/exam-papers/{id}/release-at` | ADMIN whenever; the uploader only while still locked. Body `{releaseAt}` |
+| GET | `/exam-papers/{id}/download?version=` | ADMIN and the uploader at any time; other teachers only after `releaseAt`, else **423 `LOCKED`**. Returns a 5-minute pre-signed URL |
+| GET | `/exam-papers/{id}/access-log?page=&size=` | `AUDIT_READ` (ADMIN) |
+
+**One paper per `(examId, classId, subjectId)`.** A second upload for the same triple is a **new
+version** of that paper, not a second paper, and the old versions stay — "which file did the printer
+actually get" is asked after the exam, and the only honest answer is the bytes that were there at
+the time. Only the teacher who uploaded version 1, or an admin, may add a version; another teacher
+gets 403. The class must sit the exam and the subject must be in its schedule, or 400.
+
+**PDF only, up to 20 MB** (`STORAGE_MAX_PAPER_SIZE`), identified by the file's own leading bytes
+(`%PDF`) rather than its extension or `Content-Type` — 400 `VALIDATION_ERROR` otherwise. Papers are
+stored privately under `papers/`, outside the public prefix, under a random key.
+
+**`releaseAt` is required on the first upload and must be in the future**; on a later version it is
+optional and the paper keeps the time it has. `PUT /exam-papers/{id}/release-at` moves it: an admin
+whenever (including to the past, which releases the paper now), the uploader only while the paper is
+still locked — once a paper is out, pulling it back would not unsee it. 422 otherwise.
+
+**Paper.** `{id, title, examId, examName, classId, className, subjectId, subjectName, releaseAt,
+locked, latestVersion, versionCount, createdBy, createdByName, createdAt}`, with `latestVersion`
+`{versionNo, fileName, sizeBytes, uploadedBy, uploadedByName, uploadedAt}`. `locked` is
+`releaseAt > now`. `title` defaults to `"{exam} — {subject}"`. `createdBy` and `uploadedBy` are
+unique IDs; the matching `…Name` falls back to the ID when there is no employee record for it.
+**No response ever carries a storage key or a direct URL** — the download endpoint is the only way
+to the bytes, and it is the thing that checks the clock and writes the audit entry.
+
+**Download.** `GET /exam-papers/{id}/download` answers
+`{"url": "https://…", "expiresInSeconds": 300}`; `?version=2` picks a version, and the default is
+the latest. Fetch it straight away and do not store it: for those five minutes the URL *is* the
+access. A teacher who did not upload it and asks before release gets:
+
+```json
+{ "code": "LOCKED", "detail": "Available from 14 Oct 2026, 10:00",
+  "releaseAt": "2026-10-14T04:30:00Z", "retryAfterSeconds": 601 }
+```
+
+The time in `detail` is formatted in the school's timezone (`APP_TIMEZONE`); `releaseAt` is the same
+instant in UTC, for a client that wants to format it itself. **Students and staff get 403**, not 423:
+they do not hold `EXAM_PAPER_READ` at all, so the lock is not the reason they are refused.
+
+**Everything is audited.** `EXAM_PAPER_UPLOADED`, `EXAM_PAPER_VERSION_ADDED`,
+`EXAM_PAPER_RELEASE_CHANGED` and `EXAM_PAPER_DOWNLOADED` entries name who, which paper and which
+version; storage keys and the signed URL are never written to the trail.
+`GET /exam-papers/{id}/access-log` is that paper's slice of `GET /audit`, paged (default 50) and
+newest first, with the same entry shape.
 
 ### Quizzes
 | Method | Path | Who |
 |---|---|---|
-| GET/POST/PUT | `/quizzes` | write: ADMIN, TEACHER; read: STUDENT sees quizzes for their class only |
-| POST | `/quizzes/{id}/publish` | ADMIN, TEACHER |
-| POST | `/quizzes/{id}/attempts` | STUDENT. Starts an attempt and returns questions **without answers** |
+| GET | `/quizzes?classId=&status=` | `QUIZ_MANAGE` (ADMIN, TEACHER). ADMIN sees all, a teacher only their own. No questions |
+| GET | `/quizzes/{id}` | same, and a teacher only their own. **Full quiz, answer key included** |
+| POST | `/quizzes` | same. Created as a `DRAFT`. 201 |
+| PUT | `/quizzes/{id}` | same, **only while `DRAFT`** (409 otherwise). Replaces everything, questions included |
+| POST | `/quizzes/{id}/publish` | same. `DRAFT` → `PUBLISHED` |
+| POST | `/quizzes/{id}/close` | same. `PUBLISHED` → `CLOSED` |
+| DELETE | `/quizzes/{id}` | same, **only while `DRAFT`** (409 otherwise). 204, no body |
+| GET | `/quizzes/{id}/results` | same, and a teacher only their own |
+| GET | `/quizzes/available` | `QUIZ_ATTEMPT` (STUDENT). Published quizzes for their own class/section. **No questions** |
+| POST | `/quizzes/{id}/attempts` | STUDENT. Starts an attempt and returns questions **without answers**. 201 |
 | PUT | `/quizzes/attempts/{attemptId}` | STUDENT. Submits answers; auto-graded; submissions are rejected after the time limit plus 30s grace |
-| GET | `/quizzes/{id}/results` | ADMIN, TEACHER |
 | GET | `/quizzes/attempts/mine` | STUDENT |
+
+**Status.** `DRAFT → PUBLISHED → CLOSED`, and neither step is reversible. A `DRAFT` is invisible to
+students, editable and deletable, and is allowed to be incomplete. Publishing **freezes** the
+question set — attempts store answers by question id and a score against a total, so a published
+quiz can never be edited or deleted; `close` retires one instead. `CLOSED` takes no new attempts
+whatever the window says, but attempts already in flight run to their own deadline and the results
+stay readable.
+
+**Two windows, not one.** `startAt`–`endAt` is when a quiz may be *started*; `timeLimitMinutes` is
+how long one student then gets. An attempt's `deadline` is the **earlier** of the two, so a student
+who starts five minutes before `endAt` gets five minutes.
+
+**Quiz** (`GET /quizzes/{id}`, and the response of every write): `{id, title, description, subjectId,
+classId, sections, timeLimitMinutes, startAt, endAt, maxAttempts, shuffleQuestions,
+showAnswersAfterSubmit, status, questionCount, totalMarks, questions, createdBy, createdByName,
+createdAt, updatedAt, publishedAt, closedAt}`, with `questions` entries `{id, type, text, options,
+correctOptionIds, marks, explanation}` and `options` entries `{id, text}`. `type` is `MCQ_SINGLE`,
+`MCQ_MULTI` or `TRUE_FALSE`. **This is the only response that carries `correctOptionIds`, and it
+needs `QUIZ_MANAGE`.**
+
+`GET /quizzes` returns the same without `questions`, `description` or the key, plus `attemptCount`.
+
+`POST`/`PUT` take everything but the `created*`/`updated*`/`published*`/`closed*` fields, the id,
+`status`, `questionCount` and `totalMarks`. Notes:
+- `sections` **empty or absent means every section of the class**, and is stored empty, so a section
+  added to the class later is included without touching the quiz. Named sections must exist on the class.
+- `maxAttempts` defaults to `1`. `marks` defaults to `1`. Question and option `id`s are generated when
+  left out — **send them back on a `PUT` to keep them**, since attempts refer to questions by id.
+- Write-time validation is *structural*: ids unique, every `correctOptionIds` entry is one of that
+  question's own options, `TRUE_FALSE` has exactly two options, and only `MCQ_MULTI` may have more
+  than one correct answer. `endAt` must be after `startAt` when both are sent.
+- `publish` adds the *completeness* checks a draft was excused: at least one question, a correct
+  answer marked on **every** question, and both dates present with `endAt` after `startAt`. All gaps
+  come back at once as one `400 VALIDATION_ERROR` with `errors[]`.
+
+**`GET /quizzes/available`** → `[{id, title, description, subjectId, classId, timeLimitMinutes,
+startAt, endAt, maxAttempts, questionCount, totalMarks, status, attemptsUsed, bestScore, canStart,
+inProgress}]`, soonest first. `status` here is the **window**: `UPCOMING`, `OPEN` or `ENDED` (not the
+quiz's `DRAFT`/`PUBLISHED`/`CLOSED`). `attemptsUsed` counts started attempts, abandoned ones
+included; `bestScore` is null until something is submitted; `inProgress` is true when an attempt is
+still in flight, so the button should say "resume". A student with no enrollment gets `[]`.
+
+**`POST /quizzes/{id}/attempts`** → `{attemptId, quizId, title, description, timeLimitMinutes,
+startedAt, deadline, attemptNo, maxAttempts, resumed, totalMarks, questions}`, where `questions`
+entries are `{id, type, text, options, marks}` — **no `correctOptionIds` and no `explanation`** —
+shuffled when the quiz has `shuffleQuestions`.
+
+Only while the window is `OPEN` (422 otherwise) and while `attemptsUsed < maxAttempts` (422). **If an
+attempt of the caller's is still in flight within its deadline, that one is returned instead** with
+`resumed: true`, in its original order and with the original deadline: a refresh or a dropped
+connection must not cost an attempt or reset the clock. An in-flight attempt past its deadline is
+spent — it is not resumable, and it still counts as used.
+
+**`PUT /quizzes/attempts/{attemptId}`** takes `{answers: [{questionId, selectedOptionIds}]}` and
+returns `{attemptId, quizId, title, score, maxScore, submittedAt, questions}`.
+
+- Rejected with 403 if the attempt is not the caller's, 409 if it was already submitted, and 422 once
+  more than **30 seconds** have passed since `deadline`.
+- **Grading is exact-match and all-or-nothing**: a question earns its full `marks` when the set of
+  options chosen equals the set keyed correct, and `0` otherwise. `MCQ_MULTI` has no partial credit.
+- Questions left out of `answers` are skipped and score `0`; a blank `selectedOptionIds` is never
+  correct. An unknown or repeated `questionId`, an option that is not on its question, or two options
+  on a non-`MCQ_MULTI` question are all `400 VALIDATION_ERROR` — the client is marking a different
+  paper from the server.
+- `questions` is **`null` unless the quiz has `showAnswersAfterSubmit`**. When present, its entries
+  are `{id, text, options, selected, correct, wasRight, marks, marksAwarded, explanation}`, in the
+  attempt's own question order.
+
+**`GET /quizzes/attempts/mine`** → `[{attemptId, quizId, title, attemptNo, startedAt, deadline,
+submittedAt, autoSubmitted, submitted, score, maxScore}]`, newest first.
+
+**Expired attempts are auto-submitted.** A job runs every minute and submits any attempt whose
+`deadline` passed (plus the same 30s grace) with no answers and `score: 0`, setting `submittedAt` to
+the `deadline` and `autoSubmitted: true`. So an abandoned attempt **counts against `maxAttempts`**,
+stops being resumable, and shows on the results sheet — a zero nobody earned stays distinguishable
+from a zero somebody did.
+
+**`GET /quizzes/{id}/results`** → `{quizId, title, classId, sections, maxScore, rollCount,
+attemptedCount, submittedAttempts, averageScore, students, notAttempted, questions}`.
+
+- Built from the **class roll**, not from the attempts — which is the only way `notAttempted` can exist.
+- `students` entries `{uniqueId, name, section, rollNo, attempts, bestScore, maxScore, submittedAt}`,
+  best score first; `bestScore` and `submittedAt` are of the best **submitted** attempt and are null
+  while none is. A student who sat the quiz but is no longer on the roll (left, or changed section) is
+  still listed, at the end with `rollNo: 0`.
+- `notAttempted` entries `{uniqueId, name, section, rollNo}`, in roll order.
+- `questions` entries `{id, text, marks, correctCount, answeredCount, attemptCount, accuracyPercent}`.
+  `accuracyPercent` is `correctCount` over **submitted attempts** to one decimal place, so **a blank
+  answer counts as wrong**; it is null until somebody submits. `answeredCount` is there for the
+  teacher who wants the other denominator.
+- `averageScore` is the mean of the best score **per student**, not per attempt: over three allowed
+  tries, a mean over attempts is dragged down by the practice runs.
 
 ### Notices
 | Method | Path | Who |
@@ -1512,10 +1839,202 @@ paged as in §1.
   authentication actions listed in §3's companion set (`LOGIN_SUCCESS`, `LOGIN_FAILURE`,
   `ACCOUNT_LOCKED`, `PASSWORD_CHANGED`, `LOGOUT`, `REFRESH_TOKEN_REUSE_REVOKED`) once B2 ships.
 
-### AI (Phase 5, behind feature flag `app.features.ai`)
+### AI (behind feature flag `app.features.ai`)
 | Method | Path | Who |
 |---|---|---|
-| POST | `/ai/quiz-draft` | ADMIN, TEACHER. `{subjectId, topic, count, difficulty}` → draft questions (not saved) |
-| POST | `/ai/report-remarks` | ADMIN, TEACHER. `{examId, studentUniqueId}` → remark text |
-| POST | `/ai/insights` | ADMIN. Returns at-risk students with reasons |
+| POST | `/ai/quiz-draft` | `AI_USE` (ADMIN, TEACHER). Draft questions, not saved |
+| POST | `/ai/report-remarks` | `AI_USE` (ADMIN, TEACHER). A suggested report-card remark, not saved |
+| POST | `/ai/insights` | `AI_USE` **and** `DASHBOARD_ADMIN` (ADMIN). Students who need attention |
 | POST | `/public/ai/chat` | anyone. Landing-page FAQ bot; rate-limited |
+
+**Nothing in this section writes anything.** A drafted quiz, a suggested remark and a list of
+findings all come back for a person to read, edit and act on. There is no AI collection, no stored
+transcript and no audit entry, because no state changes.
+
+`POST`, not `GET`, on all four: each takes a body, none is cacheable, and none is safe to replay
+from a browser's address bar.
+
+#### When the feature is off
+
+`app.features.ai=false` — the default — makes **every path under `/ai` and `/public/ai` answer 404
+with `code: "FEATURE_DISABLED"`**, for every role, whether or not the path exists. The deployment
+needs no API key in that state and starts without one. Read `features.ai` from
+`GET /public/school` and hide the AI entry points; do not call an endpoint to discover whether it is
+there. One exception, and it is the generic one: an **unauthenticated** call to `/ai/**` is 401
+`UNAUTHORIZED`, because the filter chain rejects it before anything knows the request was about AI.
+
+#### Shared failure modes
+
+| Status | `code` | When |
+|---|---|---|
+| 502 | `DEPENDENCY_FAILED` | The provider was unreachable, slow, out of quota, or returned something unusable. Each call is given 30 s and is not retried, so a failure is a failure within about half a minute. Safe to retry by hand. |
+| 429 | `RATE_LIMITED` | `/public/ai/chat` only, see below. |
+| 404 | `FEATURE_DISABLED` | The feature is off in this deployment. |
+
+A 502 is never a client error: the request was fine and the upstream was not. Show "the AI service
+is unavailable, try again" and keep whatever the user had typed.
+
+#### POST /ai/quiz-draft
+
+```json
+{
+  "subjectId": "64f0...", "classId": "64f0...",
+  "topic": "Photosynthesis", "count": 10, "difficulty": "MEDIUM",
+  "typeMix": { "mcqSingle": 3, "mcqMulti": 1, "trueFalse": 1 }
+}
+```
+
+`difficulty` is `EASY`, `MEDIUM` or `HARD`. `count` is 1–15. `subjectId` and `classId` must exist —
+404 otherwise, checked before the provider is called. `typeMix` is optional and **proportional, not
+exact**: the three numbers are scaled so they add up to `count`, so `{3, 1, 1}` over 10 questions
+asks for 6 / 2 / 2, and so does `{6, 2, 2}`. Omitted, or all zero, means every question is
+`MCQ_SINGLE`.
+
+```json
+{
+  "subjectId": "64f0...", "subjectName": "Science",
+  "classId": "64f0...", "className": "Class 7",
+  "topic": "Photosynthesis", "difficulty": "MEDIUM",
+  "requested": 10, "dropped": 1,
+  "questions": [{
+    "id": "q1",
+    "type": "MCQ_SINGLE",
+    "text": "Which gas do plants take in during photosynthesis?",
+    "options": [
+      { "id": "q1o1", "text": "Oxygen" },
+      { "id": "q1o2", "text": "Carbon dioxide" },
+      { "id": "q1o3", "text": "Nitrogen" },
+      { "id": "q1o4", "text": "Hydrogen" }
+    ],
+    "correctOptionIds": ["q1o2"],
+    "marks": 1,
+    "explanation": "Plants absorb carbon dioxide from the air and release oxygen."
+  }]
+}
+```
+
+`questions[]` is **field-for-field the question object `POST /quizzes` takes**, so it can go straight
+into a quiz body. The ids are positional and provisional — `POST /quizzes` mints its own on save —
+and exist only so `correctOptionIds` has something to point at. `marks` is always 1.
+
+`questions.length` may be **less than `count`**, for two separate reasons:
+- `dropped` counts questions that came back malformed and were discarded. The rule is "would
+  `POST /quizzes` reject this?" — no answer keyed, a key pointing at an option that is not there, one
+  option, more than ten, a `TRUE_FALSE` with three choices, text past the field limit. Nothing is
+  patched: a half-written question is dropped, not guessed at.
+- the model may simply write fewer than it was asked for, which is not an error and is not counted in
+  `dropped`.
+
+Show the count, let the teacher regenerate if it is short, and never assume the array is `count` long.
+
+#### POST /ai/report-remarks
+
+```json
+{ "examId": "64f0...", "studentUniqueId": "DEMO-STU-26-00001" }
+```
+
+```json
+{
+  "studentUniqueId": "DEMO-STU-26-00001",
+  "examId": "64f0...", "examName": "Half Yearly",
+  "remark": "Aarav has worked steadily this term and his 78 in Mathematics shows real confidence with numbers. Science needs more attention, where a little more revision before tests would help him a great deal.",
+  "basis": {
+    "percentage": 68.5, "grade": "B1",
+    "previousExamName": "Unit Test 1", "trend": -4.25,
+    "attendance": 91.3
+  }
+}
+```
+
+The exam must be PUBLISHED and must be one the student's current class sits — 422 `UNPROCESSABLE`
+otherwise. `basis` is what the remark was written from, so a teacher can check the sentence against
+the numbers before signing their name under it. `previousExamName` and `trend` are **null for the
+first published exam of the session**, and the remark does not claim a trend in that case. `trend` is
+in percentage points, signed.
+
+**What is sent to the provider is only this:** the student's first name, the subject marks and
+grades, the movement since the previous exam, and the attendance percentage. No surname, no unique
+id, no class, no rank, no guardian, no fees. The remark will never mention a rank — it is not told
+one.
+
+#### POST /ai/insights
+
+```json
+{ "classId": null, "section": null, "limit": 50 }
+```
+
+Every field is optional and `{}` scans the whole school. `limit` is 1–200, 50 by default, and is
+applied **after** sorting, so it keeps the students who need attention most rather than whichever
+class was read first.
+
+Returns a **bare array**, sorted by number of flags, most first, then by `uniqueId`:
+
+```json
+[{
+  "uniqueId": "DEMO-STU-26-00042",
+  "name": "Aarav Sharma",
+  "className": "Class 7",
+  "section": "B",
+  "flags": ["LOW_ATTENDANCE", "SUBJECT_FAILED", "FEES_OVERDUE"],
+  "summary": "Has missed a lot of school this year, failed a subject in the last exam, and fees are overdue."
+}]
+```
+
+(`className`, not `class` — `class` is a reserved word in several of the languages on both sides of
+this API, and the rest of the contract already says `className`.)
+
+**`flags` is the finding; `summary` is only its wording.** Every flag is computed in code from the
+school's own records, with thresholds the school owns:
+
+| Flag | Rule |
+|---|---|
+| `LOW_ATTENDANCE` | Under 75% of the session's **marked** days, measured from the session start to today. A class whose register was never taken produces no flag rather than 0%. |
+| `MARKS_DROPPED` | The latest published exam is **15 or more percentage points** below the one before it. In points, not relative: 70→55 counts, 20→17 does not. Needs two published exams. |
+| `SUBJECT_FAILED` | At least one subject failed, absent or unmarked in the latest published exam. |
+| `FEES_OVERDUE` | Fee status is `OVERDUE` — something still owed past its due date plus the grace days. |
+
+The model is handed a first name and the flag list and asked for one sentence. It cannot add, drop or
+disagree with a flag. A client that would rather write its own wording should read `flags` and ignore
+`summary`.
+
+`summary` is **null** when the provider could not be reached: the scan still returns its findings,
+because a failure to phrase a finding is not a reason to withhold it. This endpoint is the one place
+a provider failure is *not* a 502.
+
+#### POST /public/ai/chat
+
+```json
+{
+  "message": "What are the school timings?",
+  "history": [
+    { "role": "USER", "content": "Do you have a bus?" },
+    { "role": "ASSISTANT", "content": "Yes, the school runs buses on several routes." }
+  ]
+}
+```
+
+```json
+{ "reply": "The school office is open from 8 am to 2 pm on working days. For class timings, please contact the school office on +91 755 400 1200." }
+```
+
+- `message` is 1–500 characters. `history` is **at most 6 turns**, oldest first, each `content`
+  1–500 characters; `role` is `USER` or `ASSISTANT`. More than six turns is 400 `VALIDATION_ERROR`
+  rather than a silent truncation — trim the conversation client-side.
+- **Nothing is stored.** No transcript, no visitor, no id. The client holds the conversation and
+  sends back the part it wants the bot to have, which is also why both limits are the client's to
+  respect and the server's to enforce.
+- **Rate limit: 10 requests per minute per IP**, then 429 `RATE_LIMITED` with
+  `retryAfterSeconds`. Counted after the body validates, so a malformed request costs nothing. The
+  window is fixed, not sliding, and is kept in memory — a restart forgives everybody.
+- The bot answers from the school's **public** configuration (the same content as
+  `GET /public/school`) and the **current public notices**, and nothing else. It is instructed to
+  answer only school-related questions — admissions, fees, timings, facilities, academics, contact —
+  to be brief, to say "please contact the school office" when the answer is not in that context, and
+  never to invent a fee, an amount or a date. Expect it to decline homework help and general
+  knowledge. It never discusses an individual student, because it is never told about one.
+
+#### Configuration
+
+`APP_FEATURES_AI`, `AI_API_KEY`, `AI_MODEL` (default `gpt-4o-mini`) and `AI_TIMEOUT` (default `30s`).
+OpenAI is the one provider wired in; changing it is a dependency change, not a setting. The key is
+never logged and is not returned by any endpoint, including `GET /school/config`.

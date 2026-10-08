@@ -125,6 +125,16 @@ public class UserService {
 	}
 
 	/**
+	 * Whether an address is already somebody's login. The unique index on {@code users.email} is what
+	 * actually enforces this; the check exists so the employee import (B6) can report a clash as a row
+	 * of the spreadsheet rather than letting the insert fail halfway through the file.
+	 */
+	public boolean emailTaken(String email) {
+		String normalized = normalizeEmail(email);
+		return normalized != null && users.existsByEmail(normalized);
+	}
+
+	/**
 	 * Enables or disables a login. Disabling is how an employee who has left loses access; the account
 	 * is kept rather than deleted, so the audit trail and payroll history stay readable. Disabling also
 	 * ends their sessions, since an access token already issued is not revocable.

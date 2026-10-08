@@ -32,19 +32,39 @@ public enum ErrorType {
 	RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Too many requests"),
 	INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error"),
 	DEPENDENCY_FAILED(HttpStatus.BAD_GATEWAY, "Upstream dependency failed"),
-	FEATURE_DISABLED(HttpStatus.SERVICE_UNAVAILABLE, "Feature disabled");
+	FEATURE_DISABLED(HttpStatus.SERVICE_UNAVAILABLE, "Feature disabled"),
+	/**
+	 * A feature switched off at deployment level where the route must not even admit to existing: the
+	 * AI endpoints when {@code app.features.ai} is false (B18). Carries the same {@code code} and
+	 * {@code type} as {@link #FEATURE_DISABLED} — a client branches on the code and this is the same
+	 * condition — and differs only in the status, so a school without AI looks to the outside like a
+	 * build that never had those routes.
+	 */
+	FEATURE_DISABLED_NOT_FOUND(HttpStatus.NOT_FOUND, "Feature disabled", "FEATURE_DISABLED");
 
 	/** Base for the {@code type} URI; kept off the request host so it stays stable per deployment. */
 	public static final String TYPE_BASE = "https://schoolmanagement.dev/problems/";
 
 	private final HttpStatus status;
 	private final String title;
+	private final String code;
 	private final URI type;
 
 	ErrorType(HttpStatus status, String title) {
+		this(status, title, null);
+	}
+
+	/**
+	 * @param code the wire code, when it is deliberately not the constant name. Only for a second
+	 *             member describing the same condition at a different status; the {@code type} URI is
+	 *             derived from the code, so the two stay indistinguishable to a client that branches on
+	 *             either.
+	 */
+	ErrorType(HttpStatus status, String title, String code) {
 		this.status = status;
 		this.title = title;
-		this.type = URI.create(TYPE_BASE + name().toLowerCase(Locale.ROOT).replace('_', '-'));
+		this.code = code == null ? name() : code;
+		this.type = URI.create(TYPE_BASE + this.code.toLowerCase(Locale.ROOT).replace('_', '-'));
 	}
 
 	public HttpStatus status() {
@@ -61,7 +81,7 @@ public enum ErrorType {
 
 	/** The value put in the {@code code} property, e.g. {@code VALIDATION_ERROR}. */
 	public String code() {
-		return name();
+		return code;
 	}
 
 	/**

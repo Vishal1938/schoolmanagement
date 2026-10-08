@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -177,6 +178,38 @@ public class StudentAttendanceService {
 		AttendanceSummary summary = AttendanceSummary.of(
 				statuses(days(UserService.normalizeUniqueId(studentUniqueId), from, to)));
 		return new AttendanceShare(summary.workingDays(), summary.percentage());
+	}
+
+	/**
+	 * The same, for every student on a class's registers at once, keyed by unique id.
+	 *
+	 * <p>One read of the class's registers rather than one per child, which is what makes the
+	 * school-wide scan in B18 a few queries instead of a few hundred. A student who appears on no
+	 * register in the range is simply absent from the map — not present at 0%, which would be a
+	 * different and untrue claim.
+	 *
+	 * <p>No caller check, for the same reason {@link #shareFor} has none: it returns percentages and
+	 * nothing finer, and whoever asked has already been authorised to look at this class.
+	 */
+	public Map<String, AttendanceShare> sharesForClass(String classId, LocalDate from, LocalDate to) {
+		if (from == null || to == null || to.isBefore(from)) {
+			return Map.of();
+		}
+		Map<String, List<AttendanceStatus>> byStudent = new LinkedHashMap<>();
+		for (StudentAttendance register : attendance.findByClassIdAndDateBetween(classId, from, to)) {
+			if (register.getEntries() == null) {
+				continue;
+			}
+			for (StudentAttendanceEntry entry : register.getEntries()) {
+				byStudent.computeIfAbsent(entry.studentUniqueId(), unused -> new ArrayList<>()).add(entry.status());
+			}
+		}
+		Map<String, AttendanceShare> shares = new LinkedHashMap<>();
+		byStudent.forEach((uniqueId, statuses) -> {
+			AttendanceSummary summary = AttendanceSummary.of(statuses);
+			shares.put(uniqueId, new AttendanceShare(summary.workingDays(), summary.percentage()));
+		});
+		return shares;
 	}
 
 	/** The days of this student's attendance that were actually marked in the range, in date order. */

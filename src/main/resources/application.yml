@@ -29,6 +29,21 @@ spring:
   threads:
     virtual:
       enabled: true
+  ai:
+    model:
+      # Every one of Spring AI's OpenAI auto-configurations is off, deliberately and in every
+      # deployment. Each asserts a non-empty spring.ai.openai.api-key while the context is built, so
+      # leaving any of them on would stop a school that has AI switched off from starting at all.
+      # AiModelConfig builds the chat model from app.ai.* instead, and only when app.features.ai is
+      # true. Chat is also the only one B18 uses: this application does not generate images, speech,
+      # transcriptions or embeddings, so the rest would only be beans waiting to break a startup.
+      chat: none
+      embedding: none
+      image: none
+      moderation: none
+      audio:
+        speech: none
+        transcription: none
 
 server:
   port: ${SERVER_PORT:8080}
@@ -68,6 +83,7 @@ app:
     public-base-url: ${STORAGE_PUBLIC_BASE_URL:}
     max-image-size: ${STORAGE_MAX_IMAGE_SIZE:5MB}
     max-attachment-size: ${STORAGE_MAX_ATTACHMENT_SIZE:10MB}
+    max-paper-size: ${STORAGE_MAX_PAPER_SIZE:20MB}
   razorpay:
     key-id: ${RAZORPAY_KEY_ID:}
     key-secret: ${RAZORPAY_KEY_SECRET:}
@@ -79,7 +95,12 @@ app:
     # Base64 AES-256 key for employee bank details (B6).
     key: ${ENCRYPTION_KEY:}
   ai:
+    # Only read when app.features.ai is true (B18). A deployment with AI switched off needs no key
+    # and must still start, which is why the chat model is built by the ai module rather than by
+    # Spring AI's own auto-configuration — see spring.ai.model.chat below.
     api-key: ${AI_API_KEY:}
+    model: ${AI_MODEL:gpt-4o-mini}
+    timeout: ${AI_TIMEOUT:30s}
   seed:
     # First boot loads school_config from this file. Any Spring resource location works; point it at
     # file:./seed/school-seed.json to change a deployment's seed without rebuilding.

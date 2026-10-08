@@ -20,6 +20,7 @@ public final class HasPermission {
 	public static final String STUDENT_WRITE = "hasAuthority('STUDENT_WRITE')";
 	public static final String EMPLOYEE_READ = "hasAuthority('EMPLOYEE_READ')";
 	public static final String EMPLOYEE_WRITE = "hasAuthority('EMPLOYEE_WRITE')";
+	public static final String IMPORT_CREDENTIALS_READ = "hasAuthority('IMPORT_CREDENTIALS_READ')";
 	public static final String ATTENDANCE_MARK_STUDENT = "hasAuthority('ATTENDANCE_MARK_STUDENT')";
 	public static final String ATTENDANCE_MARK_EMPLOYEE = "hasAuthority('ATTENDANCE_MARK_EMPLOYEE')";
 	public static final String ATTENDANCE_CORRECT_ANY = "hasAuthority('ATTENDANCE_CORRECT_ANY')";
@@ -39,6 +40,7 @@ public final class HasPermission {
 	public static final String NOTICE_WRITE_CLASS = "hasAuthority('NOTICE_WRITE_CLASS')";
 	public static final String NOTICE_READ = "hasAuthority('NOTICE_READ')";
 	public static final String QUIZ_MANAGE = "hasAuthority('QUIZ_MANAGE')";
+	public static final String QUIZ_MANAGE_ALL = "hasAuthority('QUIZ_MANAGE_ALL')";
 	public static final String QUIZ_ATTEMPT = "hasAuthority('QUIZ_ATTEMPT')";
 	public static final String ACADEMICS_MANAGE = "hasAuthority('ACADEMICS_MANAGE')";
 	public static final String SCHOOL_CONFIG_MANAGE = "hasAuthority('SCHOOL_CONFIG_MANAGE')";
@@ -64,6 +66,13 @@ public final class HasPermission {
 	public static final String DASHBOARD_ADMIN = "hasAuthority('DASHBOARD_ADMIN')";
 	public static final String AUDIT_READ = "hasAuthority('AUDIT_READ')";
 	public static final String AI_USE = "hasAuthority('AI_USE')";
+
+	/**
+	 * The at-risk scan (B18). It reads attendance, results and fee status for every student on the
+	 * roll, which is the admin dashboard's reach rather than a teacher's — so it is spelled as the
+	 * two permissions it actually needs, and a teacher holding {@code AI_USE} alone is refused.
+	 */
+	public static final String AI_INSIGHTS = "hasAuthority('AI_USE') and hasAuthority('DASHBOARD_ADMIN')";
 
 	private HasPermission() {
 	}
