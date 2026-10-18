@@ -1,4 +1,21 @@
 {
+  "institutionType": "SCHOOL",
+  "terms": {
+    "institution": "School",
+    "class": "Class",
+    "section": "Section",
+    "teacher": "Teacher"
+  },
+  "modules": {
+    "exams": true,
+    "quizzes": true,
+    "examPapers": true,
+    "notices": true,
+    "studentLogin": true,
+    "onlinePayments": true,
+    "landingPage": true,
+    "ai": true
+  },
   "identity": {
     "name": "Demo Vidya Mandir Senior Secondary School",
     "tagline": "Learn with curiosity, lead with character",

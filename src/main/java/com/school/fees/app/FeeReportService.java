@@ -2,6 +2,7 @@ package com.school.fees.app;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -14,6 +15,7 @@ import com.school.academics.app.AcademicContext;
 import com.school.academics.app.SchoolClassService;
 import com.school.academics.domain.SchoolClass;
 import com.school.fees.api.DefaulterResponse;
+import com.school.fees.domain.InstallmentKind;
 import com.school.fees.domain.Invoice;
 import com.school.fees.domain.InvoiceStatus;
 import com.school.fees.domain.LateFineRule;
@@ -61,12 +63,23 @@ public class FeeReportService {
 	 *
 	 * @param sessionId defaults to the active session
 	 * @param classId   optional; omit for the whole school
+	 * @param kind      optional; only invoices of this kind count — MONTHLY to chase the fees alone,
+	 *                  CUSTOM to chase outstanding fines
+	 * @param month     optional; only invoices falling due in that month count, which is how "who has
+	 *                  not paid Oct 2026" is answered
 	 */
-	public List<DefaulterResponse> defaulters(String sessionId, String classId) {
+	public List<DefaulterResponse> defaulters(String sessionId, String classId, InstallmentKind kind,
+			YearMonth month) {
 		String session = hasText(sessionId) ? sessionId.trim() : academicContext.currentSessionId();
-		List<Invoice> owed = hasText(classId)
+		List<Invoice> owed = (hasText(classId)
 				? invoices.findBySessionIdAndClassIdAndStatusIn(session, classId.trim(), OWED)
-				: invoices.findBySessionIdAndStatusIn(session, OWED);
+				: invoices.findBySessionIdAndStatusIn(session, OWED)).stream()
+				// Filtered in memory rather than in the query. Both filters are optional, a session's
+				// unsettled invoices are already narrowed by an index, and a month is a range over a
+				// LocalDate that would need its own compound index to be worth pushing down.
+				.filter(invoice -> kind == null || invoice.resolvedKind() == kind)
+				.filter(invoice -> month == null || fallsDueIn(invoice, month))
+				.toList();
 		if (owed.isEmpty()) {
 			return List.of();
 		}
@@ -107,6 +120,11 @@ public class FeeReportService {
 						Comparator.nullsLast(Comparator.naturalOrder()))
 				.thenComparing(DefaulterResponse::balance, Comparator.reverseOrder()));
 		return rows;
+	}
+
+	/** An invoice with no due date falls due in no month, so a month filter never picks it up. */
+	private static boolean fallsDueIn(Invoice invoice, YearMonth month) {
+		return invoice.getDueDate() != null && YearMonth.from(invoice.getDueDate()).equals(month);
 	}
 
 	private static boolean hasText(String value) {

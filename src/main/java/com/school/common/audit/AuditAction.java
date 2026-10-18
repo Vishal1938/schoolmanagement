@@ -191,6 +191,27 @@ public enum AuditAction {
 	FEE_STRUCTURE_UPDATED,
 
 	/**
+	 * A course-wide one-off fee was removed from a structure, together with the invoices raised from
+	 * it. {@code before} is the installment and {@code after} carries how many invoices went with it —
+	 * the one place in fees where invoices are deleted rather than cancelled, so it is recorded on its
+	 * own rather than as a plain structure edit.
+	 */
+	FEE_ONE_TIME_FEE_DELETED,
+
+	/**
+	 * An individual charge was raised against one student — a fine, a trip, a replacement book. One
+	 * entry per student, with the invoice in {@code after}, because each is a separate bill even when
+	 * twenty were created by one request.
+	 */
+	FEE_CHARGE_CREATED,
+
+	/**
+	 * An individual charge was withdrawn before anything was paid against it. {@code before} is the
+	 * invoice that was deleted.
+	 */
+	FEE_CHARGE_DELETED,
+
+	/**
 	 * A {@code generate-invoices} run. The entity is the structure, and {@code after} holds the
 	 * counts — how many students, how many written and how many already existed — rather than every
 	 * invoice, which have their own entries.

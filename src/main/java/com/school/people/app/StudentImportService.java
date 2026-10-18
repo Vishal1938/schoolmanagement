@@ -286,22 +286,31 @@ public class StudentImportService {
 			Map<String, Set<Integer>> claimedRolls, LocalDate today) {
 		Map<String, Integer> nextRollNo = new HashMap<>();
 		List<ImportCredentialsService.Credential> credentials = new ArrayList<>(admissions.size());
+		// Asked once rather than per row: switching a module mid-import is not a case worth modelling,
+		// and a file half of whose rows have logins would be worse than either outcome.
+		boolean withLogins = students.studentLoginsEnabled();
 
+		int created = 0;
 		for (Admission admission : admissions) {
 			int rollNo = admission.rollNo() != null
 					? admission.rollNo()
 					: assignRollNo(admission, sessionId, claimedRolls, nextRollNo);
-			StudentCreatedResponse created = students.admit(requestFor(admission, rollNo));
-			credentials.add(new ImportCredentialsService.Credential(admission.name(), admission.sectionName(),
-					created.uniqueId(), created.temporaryPassword()));
+			StudentCreatedResponse admitted = students.admit(requestFor(admission, rollNo));
+			created++;
+			if (withLogins) {
+				credentials.add(new ImportCredentialsService.Credential(admission.name(), admission.sectionName(),
+						admitted.uniqueId(), admitted.temporaryPassword()));
+			}
 		}
 
-		String credentialsFileId = credentialsFiles.store(credentials);
+		// No logins, no credentials file: there would be nothing in it but a column of blanks, and an
+		// admin downloading it would reasonably read that as the import having gone wrong.
+		String credentialsFileId = withLogins ? credentialsFiles.store(credentials) : null;
 		// The count and the file id only: the passwords themselves are never audited, and never logged.
 		audit.record(AuditAction.STUDENTS_IMPORTED, AUDIT_ENTITY, credentialsFileId, null,
-				Map.of("created", credentials.size(), "importedOn", today.toString()));
-		log.info("Imported {} student(s) from a spreadsheet", credentials.size());
-		return ImportResult.created(credentials.size(), credentialsFileId);
+				Map.of("created", created, "importedOn", today.toString(), "logins", withLogins));
+		log.info("Imported {} student(s) from a spreadsheet (logins: {})", created, withLogins);
+		return ImportResult.created(created, credentialsFileId);
 	}
 
 	/**

@@ -2,6 +2,7 @@ package com.school.fees.domain;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -56,5 +57,15 @@ public class FeeStructure {
 	/** What the whole year costs this class before any concession, in paise. */
 	public long yearTotal() {
 		return installments == null ? 0L : installments.stream().mapToLong(Installment::total).sum();
+	}
+
+	/** Never null, so callers can stream without a guard. */
+	public List<Installment> installmentsOrEmpty() {
+		return installments == null ? List.of() : installments;
+	}
+
+	/** The installment of that name, if this structure has one. Names are unique within a structure. */
+	public Optional<Installment> installmentNamed(String name) {
+		return installmentsOrEmpty().stream().filter(installment -> installment.name().equals(name)).findFirst();
 	}
 }

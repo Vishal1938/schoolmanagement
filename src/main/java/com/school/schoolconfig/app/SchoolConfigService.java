@@ -22,6 +22,7 @@ import com.school.schoolconfig.domain.GradeBand;
 import com.school.schoolconfig.domain.GradingMode;
 import com.school.schoolconfig.domain.GradingScheme;
 import com.school.schoolconfig.domain.Identity;
+import com.school.schoolconfig.domain.InstitutionType;
 import com.school.schoolconfig.domain.Principal;
 import com.school.schoolconfig.domain.SchoolConfig;
 import com.school.schoolconfig.infra.SchoolConfigRepository;
@@ -74,6 +75,15 @@ public class SchoolConfigService {
 		validateGradingScheme(request.gradingScheme());
 		SchoolConfig before = get();
 		SchoolConfig updated = before.toBuilder()
+				// These three alone are "not sent means not changed", unlike the wholesale replacement
+				// the rest of this request is: they were added after the admin screen existed, and a
+				// client that does not know about them must not silently rename a college's courses
+				// back to "Class" or switch every module on again. See SchoolConfigMapper.
+				.institutionType(request.institutionType() == null
+						? before.resolvedInstitutionType()
+						: request.institutionType())
+				.terms(mapper.toTerms(request.terms(), before.getTerms()))
+				.modules(mapper.toModules(request.modules(), before.getModules()))
 				.identity(mapper.toIdentity(request.identity()))
 				.landing(mapper.toLanding(request.landing()))
 				.gradingScheme(mapper.toGradingScheme(request.gradingScheme()))
@@ -101,6 +111,10 @@ public class SchoolConfigService {
 		SchoolConfig config = SchoolConfig.builder()
 				.id(SchoolConfig.SINGLETON_ID)
 				.code(properties.schoolCode())
+				// Nothing to keep on a first boot, so the seed's own values or the school defaults.
+				.institutionType(seed.institutionType() == null ? InstitutionType.SCHOOL : seed.institutionType())
+				.terms(mapper.toTerms(seed.terms(), null))
+				.modules(mapper.toModules(seed.modules(), null))
 				.identity(mapper.toIdentity(seed.identity()))
 				.landing(mapper.toLanding(seed.landing()))
 				.gradingScheme(mapper.toGradingScheme(seed.gradingScheme()))

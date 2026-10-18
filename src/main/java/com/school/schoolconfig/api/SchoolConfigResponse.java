@@ -6,6 +6,9 @@ import java.util.List;
 import java.util.Set;
 
 import com.school.schoolconfig.domain.GradingMode;
+import com.school.schoolconfig.domain.InstitutionType;
+import com.school.schoolconfig.domain.Modules;
+import com.school.schoolconfig.domain.Terms;
 
 /**
  * The complete configuration, for {@code GET /school/config}. ADMIN only: it carries the receipt
@@ -13,9 +16,18 @@ import com.school.schoolconfig.domain.GradingMode;
  *
  * <p>Mirrors {@link SchoolConfigRequest} so an admin screen can load this, edit it and PUT it back,
  * with {@code code} and {@code updatedAt} added as read-only.
+ *
+ * <p>{@link Terms} and {@link Modules} are the domain value types rather than copies of them, the
+ * same way {@link GradingMode} already is: they are immutable, they carry no money and no identity,
+ * and a second declaration of eight booleans would only be a thing to forget to update. They are
+ * returned <strong>resolved</strong> — defaults filled in — so an admin screen renders the values
+ * that are actually in force rather than a set of nulls.
  */
 public record SchoolConfigResponse(
 		String code,
+		InstitutionType institutionType,
+		Terms terms,
+		Modules modules,
 		Identity identity,
 		Landing landing,
 		GradingScheme gradingScheme,

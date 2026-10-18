@@ -4,7 +4,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -32,6 +34,7 @@ import com.school.fees.api.StudentFeesResponse;
 import com.school.fees.domain.Concession;
 import com.school.fees.domain.FeeStructure;
 import com.school.fees.domain.Installment;
+import com.school.fees.domain.InstallmentKind;
 import com.school.fees.domain.Invoice;
 import com.school.fees.domain.InvoiceItem;
 import com.school.fees.domain.InvoiceStatus;
@@ -135,7 +138,10 @@ public class InvoiceService {
 	private boolean insert(FeeStructure structure, Installment installment, StudentRef student,
 			Map<String, String> headNames, List<Concession> studentConcessions, Instant now) {
 		List<InvoiceItem> items = installment.items().stream()
-				.map(item -> new InvoiceItem(item.headId(), headNames.get(item.headId()), item.amount()))
+				// The section's own amount where the item has one — this is where "Year 1 pays less than
+				// Year 2" actually takes effect, and it is applied before any concession.
+				.map(item -> new InvoiceItem(item.headId(), headNames.get(item.headId()),
+						item.amountFor(student.section())))
 				.toList();
 		long gross = items.stream().mapToLong(InvoiceItem::amount).sum();
 		long concessionAmount = Concessions.amountFor(items, studentConcessions);
@@ -147,6 +153,10 @@ public class InvoiceService {
 					.sessionId(structure.getSessionId())
 					.structureId(structure.getId())
 					.installmentName(installment.name())
+					// Snapshotted with the amounts, for the same reason the head names are: a register
+					// column renamed next year must not restate a bill already issued.
+					.kind(installment.resolvedKind())
+					.label(installment.displayLabel())
 					.dueDate(installment.dueDate())
 					.items(items)
 					.concessionAmount(concessionAmount)
@@ -265,6 +275,60 @@ public class InvoiceService {
 	}
 
 	/**
+	 * The same quote for a counter payment, where the invoices name the student rather than the other
+	 * way round.
+	 *
+	 * <p>This is what {@code POST /fees/register/mark-paid} is built on: a clerk ticks cells on the
+	 * register and the server works out whose they are and what they come to. <strong>All of them have
+	 * to be one student's</strong> — a payment has one payer, one receipt and one student on it, and a
+	 * receipt listing two families' months is not a document anybody can file.
+	 *
+	 * @throws ValidationException   if the invoices belong to more than one student, or any of them is
+	 *                               unknown, cancelled or already settled
+	 * @throws BusinessRuleException if there is nothing left to pay
+	 */
+	public CounterQuote quoteForCounter(List<String> invoiceIds) {
+		List<Invoice> found = invoices.findAllByIdIn(invoiceIds);
+		if (found.isEmpty()) {
+			throw new ValidationException("No invoices were selected",
+					List.of(new FieldViolation("invoiceIds", "must name at least one invoice")));
+		}
+		Set<String> owners = found.stream().map(Invoice::getStudentUniqueId).collect(Collectors.toSet());
+		if (owners.size() > 1) {
+			throw new ValidationException("Those invoices belong to different students",
+					List.of(new FieldViolation("invoiceIds", "name invoices of " + owners.size()
+							+ " different students; one payment is one student's, because one receipt is")));
+		}
+		String studentUniqueId = owners.iterator().next();
+		// Reuses the strict quote, so an id that is not really theirs, a cancelled invoice or one that
+		// is already settled is refused here exactly as it is in the online flow.
+		FeeQuote quote = quoteForPayment(studentUniqueId, invoiceIds);
+		return new CounterQuote(studentUniqueId, quote.invoiceIds(), quote.amountDue());
+	}
+
+	/** A counter quote, which unlike {@link FeeQuote} also says whose invoices these are. */
+	public record CounterQuote(String studentUniqueId, List<String> invoiceIds, long amountDue) {
+	}
+
+	/**
+	 * What kind of charge each of these invoices is, for a caller that has payment allocations and
+	 * wants to filter them.
+	 *
+	 * <p>Exposed for the collection report in B12, which is the payment module's: it holds invoice ids
+	 * on its allocations and nothing else about them, and reporting "how much of the monthly fees came
+	 * in" means asking here rather than copying the kind onto every allocation.
+	 */
+	public Map<String, InstallmentKind> kindsOf(Collection<String> invoiceIds) {
+		if (invoiceIds == null || invoiceIds.isEmpty()) {
+			return Map.of();
+		}
+		Map<String, InstallmentKind> kinds = new LinkedHashMap<>();
+		invoices.findAllByIdIn(invoiceIds)
+				.forEach(invoice -> kinds.put(invoice.getId(), invoice.resolvedKind()));
+		return kinds;
+	}
+
+	/**
 	 * The same figure, computed again for a gateway payment that is coming back to be settled.
 	 *
 	 * <p>Lenient where {@link #quoteForPayment} is strict, and deliberately so. Minutes have passed:
@@ -367,7 +431,10 @@ public class InvoiceService {
 					.updatedAt(now)
 					.build());
 			audit.record(AuditAction.FEE_PAYMENT_APPLIED, AUDIT_ENTITY, saved.getId(), before, saved);
-			allocations.add(new InvoiceAllocation(saved.getId(), saved.getInstallmentName(), saved.getDueDate(),
+			// The display label rather than the stored name: the two are identical for a month or a
+			// course-wide fee, and for an individual charge the name may carry a "(2)" that exists only
+			// to satisfy the unique index. A receipt should say "Late library fine".
+			allocations.add(new InvoiceAllocation(saved.getId(), saved.displayLabel(), saved.getDueDate(),
 					principal, fine, headShares(saved, principal)));
 		}
 		return allocations;

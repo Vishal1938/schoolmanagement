@@ -3,7 +3,11 @@ package com.school.schoolconfig.api;
 import java.time.Duration;
 
 import com.school.common.config.AppProperties;
+import com.school.schoolconfig.app.ModuleGate;
 import com.school.schoolconfig.app.SchoolConfigService;
+import com.school.schoolconfig.domain.Modules;
+import com.school.schoolconfig.domain.SchoolConfig;
+import com.school.schoolconfig.domain.SchoolModule;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -25,25 +29,39 @@ public class PublicSchoolController {
 
 	private final SchoolConfigService service;
 	private final SchoolConfigMapper mapper;
-	private final PublicSchoolResponse.Features features;
+	private final ModuleGate gate;
+	private final boolean aiAvailable;
 
-	public PublicSchoolController(SchoolConfigService service, SchoolConfigMapper mapper, AppProperties properties) {
+	public PublicSchoolController(SchoolConfigService service, SchoolConfigMapper mapper, ModuleGate gate,
+			AppProperties properties) {
 		this.service = service;
 		this.mapper = mapper;
-		// Fixed for the life of the process: these are environment switches, not content.
-		this.features = new PublicSchoolResponse.Features(properties.features().ai());
+		this.gate = gate;
+		// Fixed for the life of the process: this is an environment switch, not content.
+		this.aiAvailable = properties.features().ai();
 	}
 
 	@GetMapping
 	@SecurityRequirements
-	@Operation(summary = "School identity and landing-page content",
+	@Operation(summary = "School identity, vocabulary, modules and landing-page content",
 			description = "Public-safe fields only: no receipt prefix, no attendance window, "
-					+ "no grading scheme, nothing internal. Carries `features` so the frontend knows "
-					+ "which optional endpoints this deployment has.")
+					+ "no grading scheme, nothing internal. Carries `terms` (what this institution calls a "
+					+ "class, a section and a teacher) and `modules` (which features are on, where off means "
+					+ "those endpoints answer 404 FEATURE_DISABLED), so the frontend can label and navigate "
+					+ "before it calls anything. With the landingPage module off, everything from `about` "
+					+ "downwards is omitted and the identity, terms and modules remain.")
 	public ResponseEntity<PublicSchoolResponse> get() {
+		SchoolConfig config = service.get();
+		// Nulling the landing block is the whole of the landingPage switch: every field the mapper takes
+		// from it reads through a null-safe path, so they all drop out of the response together.
+		SchoolConfig visible = gate.isEnabled(SchoolModule.LANDING_PAGE) ? config : config.toBuilder()
+				.landing(null)
+				.build();
+		Modules modules = gate.effectiveModules();
 		return ResponseEntity.ok()
 				// Content changes rarely and this is the most-hit endpoint in the deployment.
 				.cacheControl(CacheControl.maxAge(Duration.ofMinutes(5)).cachePublic())
-				.body(mapper.toPublicResponse(service.get(), features));
+				.body(mapper.toPublicResponse(visible, new PublicSchoolResponse.Features(aiAvailable && modules.ai()),
+						modules));
 	}
 }
