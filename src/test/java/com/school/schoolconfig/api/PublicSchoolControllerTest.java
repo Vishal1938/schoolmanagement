@@ -14,6 +14,7 @@ import com.school.common.exceptions.GlobalExceptionHandler;
 import com.school.common.exceptions.NotFoundException;
 import com.school.common.exceptions.ProblemDetailFactory;
 import com.school.schoolconfig.SchoolConfigFixtures;
+import com.school.schoolconfig.app.ModuleGate;
 import com.school.schoolconfig.app.SchoolConfigService;
 import com.school.schoolconfig.domain.Landing;
 import com.school.schoolconfig.domain.Principal;
@@ -57,8 +58,11 @@ class PublicSchoolControllerTest {
 		// Only app.features is read, and only to fill in the `features` key.
 		AppProperties properties = mock(AppProperties.class);
 		when(properties.features()).thenReturn(new AppProperties.Features(false));
+		// The real gate rather than a mock: it reads the module switches off the same stubbed service, so
+		// what these tests see is what the module set in the fixture actually publishes.
+		ModuleGate gate = new ModuleGate(service, properties);
 		mockMvc = MockMvcBuilders
-				.standaloneSetup(new PublicSchoolController(service, SchoolConfigFixtures.MAPPER, properties))
+				.standaloneSetup(new PublicSchoolController(service, SchoolConfigFixtures.MAPPER, gate, properties))
 				.setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
 				.setControllerAdvice(new GlobalExceptionHandler(
 						new ProblemDetailFactory(Clock.fixed(NOW, ZoneId.of("Asia/Kolkata")))))
