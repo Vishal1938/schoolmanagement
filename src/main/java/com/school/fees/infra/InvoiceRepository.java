@@ -25,6 +25,12 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String> {
 	/** Used to refuse an edit that would rename an installment out from under its invoices. */
 	List<Invoice> findByStructureId(String structureId);
 
+	/**
+	 * The invoices raised from one installment. Backs editing and deleting a course-wide one-off fee:
+	 * a deletion is only allowed when nothing here has been paid against.
+	 */
+	List<Invoice> findByStructureIdAndInstallmentName(String structureId, String installmentName);
+
 	/** The invoices a payment names, in one read. */
 	List<Invoice> findAllByIdIn(Collection<String> ids);
 

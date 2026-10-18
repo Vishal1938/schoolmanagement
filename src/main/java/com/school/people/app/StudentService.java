@@ -19,6 +19,7 @@ import com.school.auth.app.NewUser;
 import com.school.auth.app.UserService;
 import com.school.common.audit.AuditAction;
 import com.school.common.audit.AuditService;
+import com.school.common.exceptions.BusinessRuleException;
 import com.school.common.exceptions.ConflictException;
 import com.school.common.exceptions.FieldViolation;
 import com.school.common.exceptions.ForbiddenException;
@@ -47,6 +48,8 @@ import com.school.people.domain.Guardians;
 import com.school.people.domain.Student;
 import com.school.people.domain.StudentStatus;
 import com.school.people.infra.StudentRepository;
+import com.school.schoolconfig.app.ModuleGate;
+import com.school.schoolconfig.domain.SchoolModule;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -83,12 +86,14 @@ public class StudentService {
 	private final StudentFeeStatusProvider feeStatuses;
 	private final IdGenerator idGenerator;
 	private final TemporaryPasswordGenerator temporaryPasswords;
+	private final ModuleGate modules;
 	private final AuditService audit;
 	private final Clock clock;
 
 	public StudentService(StudentRepository students, MongoOperations mongo, SchoolClassService classes,
 			AcademicContext academicContext, UserService users, StudentFeeStatusProvider feeStatuses,
-			IdGenerator idGenerator, TemporaryPasswordGenerator temporaryPasswords, AuditService audit, Clock clock) {
+			IdGenerator idGenerator, TemporaryPasswordGenerator temporaryPasswords, ModuleGate modules,
+			AuditService audit, Clock clock) {
 		this.students = students;
 		this.mongo = mongo;
 		this.classes = classes;
@@ -97,8 +102,14 @@ public class StudentService {
 		this.feeStatuses = feeStatuses;
 		this.idGenerator = idGenerator;
 		this.temporaryPasswords = temporaryPasswords;
+		this.modules = modules;
 		this.audit = audit;
 		this.clock = clock;
+	}
+
+	/** Whether this deployment gives students a login at all; the import asks before writing a credentials file. */
+	public boolean studentLoginsEnabled() {
+		return modules.isEnabled(SchoolModule.STUDENT_LOGIN);
 	}
 
 	// --- admission --------------------------------------------------------------------------------
@@ -112,7 +123,11 @@ public class StudentService {
 	 * next admission reuses it. That is harmless — nothing was written under it — and it is the reason
 	 * MongoDB has to run as a replica set even locally.
 	 *
-	 * @return the student together with the temporary password, which is shown exactly once
+	 * <p>With the {@code studentLogin} module off, no login is created and no password is issued; the
+	 * student record is written exactly as before and {@code temporaryPassword} comes back null.
+	 *
+	 * @return the student together with the temporary password, which is shown exactly once — null when
+	 *         this deployment does not give students a login
 	 */
 	@Transactional
 	public StudentCreatedResponse admit(StudentRequest request) {
@@ -147,11 +162,18 @@ public class StudentService {
 				.updatedAt(now)
 				.build());
 
-		String temporaryPassword = temporaryPasswords.generate();
-		// No e-mail on the login: students log in with their uniqueId, and siblings routinely share
-		// the family address, which the sparse unique index on users.email would reject.
-		users.createWithUniqueId(uniqueId, new NewUser(Role.STUDENT, student.getName(), null, temporaryPassword,
-				true, student.getId()));
+		// With the studentLogin module off there is no account to create and so no password to issue:
+		// an institution that does not give students a portal should not be accumulating dormant
+		// logins, and a temporary password printed on an admission slip nobody can use is worse than
+		// none at all. The student record itself is unchanged either way.
+		String temporaryPassword = null;
+		if (modules.isEnabled(SchoolModule.STUDENT_LOGIN)) {
+			temporaryPassword = temporaryPasswords.generate();
+			// No e-mail on the login: students log in with their uniqueId, and siblings routinely share
+			// the family address, which the sparse unique index on users.email would reject.
+			users.createWithUniqueId(uniqueId, new NewUser(Role.STUDENT, student.getName(), null, temporaryPassword,
+					true, student.getId()));
+		}
 
 		audit.record(AuditAction.STUDENT_CREATED, AUDIT_ENTITY, uniqueId, null, student);
 		return new StudentCreatedResponse(uniqueId, temporaryPassword,
@@ -350,6 +372,11 @@ public class StudentService {
 	 */
 	public String resetPassword(String uniqueId) {
 		Student student = require(uniqueId);
+		if (!modules.isEnabled(SchoolModule.STUDENT_LOGIN)) {
+			// Refused with an explanation rather than letting it 404 on a user that was never created.
+			throw new BusinessRuleException("Students do not have logins in this deployment, so there is no "
+					+ "password to reset. Switch the studentLogin module on in the school configuration first.");
+		}
 		return users.resetTemporaryPassword(student.getUniqueId());
 	}
 

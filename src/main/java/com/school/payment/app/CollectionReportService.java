@@ -6,11 +6,16 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.school.common.exceptions.FieldViolation;
 import com.school.common.exceptions.ValidationException;
+import com.school.fees.app.InvoiceService;
+import com.school.fees.domain.InstallmentKind;
 import com.school.payment.api.CollectionReportResponse;
 import com.school.payment.domain.HeadAllocation;
 import com.school.payment.domain.Payment;
@@ -40,10 +45,12 @@ public class CollectionReportService {
 	private static final int MAX_RANGE_DAYS = 400;
 
 	private final PaymentRepository payments;
+	private final InvoiceService invoices;
 	private final Clock clock;
 
-	public CollectionReportService(PaymentRepository payments, Clock clock) {
+	public CollectionReportService(PaymentRepository payments, InvoiceService invoices, Clock clock) {
 		this.payments = payments;
+		this.invoices = invoices;
 		this.clock = clock;
 	}
 
@@ -56,8 +63,11 @@ public class CollectionReportService {
 	 *
 	 * @param from defaults to the first of the current month
 	 * @param to   defaults to today
+	 * @param kind optional; report only what was collected against invoices of this kind, e.g. MONTHLY
+	 *             to answer "how much of the monthly fees came in this month" separately from the
+	 *             admission fees and the fines. Omit for everything, which is the unchanged behaviour
 	 */
-	public CollectionReportResponse collection(LocalDate from, LocalDate to) {
+	public CollectionReportResponse collection(LocalDate from, LocalDate to, InstallmentKind kind) {
 		LocalDate today = LocalDate.now(clock);
 		LocalDate start = from == null ? today.withDayOfMonth(1) : from;
 		LocalDate end = to == null ? today : to;
@@ -68,30 +78,50 @@ public class CollectionReportService {
 		Instant toInstant = end.plusDays(1).atStartOfDay(clock.getZone()).toInstant();
 		List<Payment> captured = payments.findByStatusAndPaidAtGreaterThanEqualAndPaidAtLessThanOrderByPaidAtAsc(
 				PaymentStatus.CAPTURED, fromInstant, toInstant);
+		// One lookup for the whole range rather than per payment. Empty when no kind was asked for, in
+		// which case nothing below consults it.
+		Map<String, InstallmentKind> kinds = kind == null ? Map.of() : invoices.kindsOf(invoiceIdsOf(captured));
 
 		long total = 0L;
 		long principal = 0L;
 		long lateFine = 0L;
+		int paymentCount = 0;
 		Map<PaymentMode, long[]> byMode = new LinkedHashMap<>();
 		Map<String, HeadTally> byHead = new LinkedHashMap<>();
 		Map<LocalDate, long[]> daily = new LinkedHashMap<>();
 
 		for (Payment payment : captured) {
-			total += payment.getAmount();
-			principal += payment.principalTotal();
-			lateFine += payment.lateFineTotal();
+			List<PaymentAllocation> counted = kind == null
+					? allocationsOf(payment)
+					: allocationsOf(payment).stream()
+							.filter(allocation -> kinds.get(allocation.invoiceId()) == kind)
+							.toList();
+			// A payment that touched none of the kind asked for is not part of this report at all — it
+			// would otherwise inflate paymentCount with rows contributing nothing.
+			if (kind != null && counted.isEmpty()) {
+				continue;
+			}
+
+			// Unfiltered, the payment's own figures: `amount` is what was received, which can exceed what
+			// was allocated (see PAYMENT_UNALLOCATED), and a report of takings must say what was taken.
+			// Filtered, there is no such figure to quote, so the allocations are summed instead.
+			long paymentTotal = kind == null ? payment.getAmount() : principalOf(counted) + lateFineOf(counted);
+			total += paymentTotal;
+			principal += kind == null ? payment.principalTotal() : principalOf(counted);
+			lateFine += kind == null ? payment.lateFineTotal() : lateFineOf(counted);
+			paymentCount++;
 
 			// long[] {amount, count} rather than a mutable holder class: two running numbers per key.
 			long[] mode = byMode.computeIfAbsent(payment.getMode(), key -> new long[2]);
-			mode[0] += payment.getAmount();
+			mode[0] += paymentTotal;
 			mode[1]++;
 
 			LocalDate day = LocalDate.ofInstant(payment.getPaidAt(), clock.getZone());
 			long[] dayTotals = daily.computeIfAbsent(day, key -> new long[2]);
-			dayTotals[0] += payment.getAmount();
+			dayTotals[0] += paymentTotal;
 			dayTotals[1]++;
 
-			for (PaymentAllocation allocation : allocationsOf(payment)) {
+			for (PaymentAllocation allocation : counted) {
 				for (HeadAllocation head : headsOf(allocation)) {
 					byHead.computeIfAbsent(head.headId(), key -> new HeadTally(head.headName())).amount +=
 							head.amount();
@@ -99,8 +129,24 @@ public class CollectionReportService {
 			}
 		}
 
-		return new CollectionReportResponse(start, end, total, principal, lateFine, captured.size(),
+		return new CollectionReportResponse(start, end, kind, total, principal, lateFine, paymentCount,
 				modeTotals(byMode), headTotals(byHead), dayTotals(daily));
+	}
+
+	/** Every invoice any of these payments touched, for one kind lookup across the range. */
+	private static Set<String> invoiceIdsOf(List<Payment> captured) {
+		return captured.stream()
+				.flatMap(payment -> allocationsOf(payment).stream())
+				.map(PaymentAllocation::invoiceId)
+				.collect(Collectors.toCollection(LinkedHashSet::new));
+	}
+
+	private static long principalOf(List<PaymentAllocation> allocations) {
+		return allocations.stream().mapToLong(PaymentAllocation::amount).sum();
+	}
+
+	private static long lateFineOf(List<PaymentAllocation> allocations) {
+		return allocations.stream().mapToLong(PaymentAllocation::lateFine).sum();
 	}
 
 	private void requireUsableRange(LocalDate from, LocalDate to) {

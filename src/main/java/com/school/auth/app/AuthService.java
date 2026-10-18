@@ -15,6 +15,9 @@ import com.school.common.exceptions.ErrorType;
 import com.school.common.jwt.JwtService;
 import com.school.common.security.AuthPrincipal;
 import com.school.common.security.CurrentUser;
+import com.school.common.security.Role;
+import com.school.schoolconfig.app.ModuleGate;
+import com.school.schoolconfig.domain.SchoolModule;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -28,6 +31,9 @@ import org.springframework.stereotype.Service;
  * anyone enumerate valid IDs, and a {@code uniqueId} is guessable by design — it is a school code, a type
  * and a sequence number. A locked account is the one exception: {@code LOCKED} has to be distinguishable,
  * or the account holder cannot be told to come back in a quarter of an hour.
+ *
+ * <p>The second exception is the {@code studentLogin} module being off, which answers 403 for a
+ * STUDENT account and says so — see {@link #requireLoginAllowedFor}.
  */
 @Service
 public class AuthService {
@@ -49,15 +55,17 @@ public class AuthService {
 	private final RefreshTokenService refreshTokens;
 	private final PasswordEncoder passwordEncoder;
 	private final JwtService jwtService;
+	private final ModuleGate modules;
 	private final AuditService audit;
 	private final Clock clock;
 
 	public AuthService(UserRepository users, RefreshTokenService refreshTokens, PasswordEncoder passwordEncoder,
-			JwtService jwtService, AuditService audit, Clock clock) {
+			JwtService jwtService, ModuleGate modules, AuditService audit, Clock clock) {
 		this.users = users;
 		this.refreshTokens = refreshTokens;
 		this.passwordEncoder = passwordEncoder;
 		this.jwtService = jwtService;
+		this.modules = modules;
 		this.audit = audit;
 		this.clock = clock;
 	}
@@ -82,6 +90,7 @@ public class AuthService {
 		}
 
 		User user = found.get();
+		requireLoginAllowedFor(user);
 		Instant now = Instant.now(clock);
 		if (isLocked(user, now)) {
 			// Checked before the password, so a correct password does not unlock the account early and the
@@ -118,8 +127,33 @@ public class AuthService {
 				.filter(User::isEnabled)
 				// The account was disabled or removed while the session was still alive.
 				.orElseThrow(() -> new AppException(ErrorType.TOKEN_INVALID, "This account is no longer active"));
+		// Checked here as well as at login: a student holding a refresh token from before the module
+		// was switched off would otherwise keep renewing it for the week the cookie lives.
+		requireLoginAllowedFor(user);
 		AuthPrincipal principal = user.toPrincipal();
 		return new LoginResult(jwtService.issue(principal), principal, rotated.rawToken());
+	}
+
+	/**
+	 * Refuses a student's login when the {@code studentLogin} module is off.
+	 *
+	 * <p>403 with its own message rather than the usual {@code INVALID_CREDENTIALS}: the opacity of
+	 * that 401 exists to stop ID enumeration, and there is nothing to enumerate here — the answer is
+	 * the same for every student in the institution, and it is already published on
+	 * {@code GET /public/school}. A student told "the ID or password is incorrect" would try their
+	 * password again all week; told this, they stop.
+	 *
+	 * <p>Only STUDENT accounts are affected. Staff and administrators are unconditionally able to log
+	 * in, which is what makes the switch recoverable.
+	 */
+	private void requireLoginAllowedFor(User user) {
+		if (user.getRole() == Role.STUDENT && !modules.isEnabled(SchoolModule.STUDENT_LOGIN)) {
+			log.info("Login rejected for {}: student logins are disabled in this deployment", user.getUniqueId());
+			recordQuietly(AuditAction.LOGIN_FAILURE, user.getUniqueId(),
+					"Student logins are disabled in this deployment");
+			throw new AppException(ErrorType.FORBIDDEN,
+					"Student logins are not enabled in this deployment. Ask the office for your records.");
+		}
 	}
 
 	/**

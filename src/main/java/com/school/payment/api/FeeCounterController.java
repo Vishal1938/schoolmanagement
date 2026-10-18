@@ -3,6 +3,7 @@ package com.school.payment.api;
 import java.time.LocalDate;
 
 import com.school.common.security.HasPermission;
+import com.school.fees.domain.InstallmentKind;
 import com.school.payment.app.CollectionReportService;
 import com.school.payment.app.PaymentService;
 import com.school.payment.domain.Payment;
@@ -54,15 +55,35 @@ public class FeeCounterController {
 		return PaymentResponse.of(payment, payments.receiptUrl(payment));
 	}
 
+	@PostMapping("/register/mark-paid")
+	@ResponseStatus(HttpStatus.CREATED)
+	@PreAuthorize(HasPermission.FEE_MANAGE)
+	@Operation(summary = "Settle the ticked cells of the fee register in full",
+			description = "One counter payment covering those invoices completely, with one receipt listing "
+					+ "every month and fee it paid. There is no amount in the request: the server quotes the "
+					+ "invoices itself, outstanding principal plus whatever late fine is running today, and "
+					+ "takes exactly that. All the invoices must be one student's → 400 otherwise, because one "
+					+ "payment means one receipt. mode defaults to CASH and needs a reference for anything else; "
+					+ "paidOn defaults to today. For part payment of a single invoice, use "
+					+ "POST /fees/offline-payment, which does take an amount.")
+	public PaymentResponse markPaid(@Valid @RequestBody MarkPaidRequest request) {
+		Payment payment = payments.markPaid(request);
+		return PaymentResponse.of(payment, payments.receiptUrl(payment));
+	}
+
 	@GetMapping("/reports/collection")
 	@PreAuthorize(HasPermission.FEE_MANAGE)
 	@Operation(summary = "What came in over a date range",
 			description = "Both dates inclusive, resolved in the school's own timezone. Defaults to the "
 					+ "current month to date. Totals by mode, by head and by day; only CAPTURED payments count. "
-					+ "byHead sums to principalCollected, because a late fine belongs to no head.")
+					+ "byHead sums to principalCollected, because a late fine belongs to no head. Pass kind to "
+					+ "report one sort of charge only — MONTHLY for the recurring fees, ONE_TIME for admission "
+					+ "fees and deposits, CUSTOM for individual charges and fines — in which case every figure "
+					+ "counts only the allocations of that kind and payments touching none of it are left out.")
 	public CollectionReportResponse collection(
 			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-		return reports.collection(from, to);
+			@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+			@RequestParam(required = false) InstallmentKind kind) {
+		return reports.collection(from, to, kind);
 	}
 }

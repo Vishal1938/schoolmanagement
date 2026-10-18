@@ -31,7 +31,9 @@ import org.springframework.data.mongodb.core.mapping.Document;
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 @Document(Invoice.COLLECTION)
 // This is what makes generate-invoices idempotent: running it twice hits this index on every row it
-// already wrote, rather than billing the school's students twice.
+// already wrote, rather than billing the school's students twice. A CUSTOM charge has a null
+// structureId, so the same index also stops one student being charged "Late library fine" twice
+// under one name — StudentChargeService suffixes the name rather than colliding.
 @CompoundIndex(name = "fee_invoices_student_structure_installment_idx",
 		def = "{'studentUniqueId': 1, 'structureId': 1, 'installmentName': 1}", unique = true)
 // The per-student ledger and the fee status, which is every read on this collection that matters.
@@ -54,11 +56,32 @@ public class Invoice {
 
 	private String sessionId;
 
-	/** The structure this came from, and where the live late-fine rule is read from. */
+	/**
+	 * The structure this came from, and where the live late-fine rule is read from.
+	 *
+	 * <p>Null for a {@link InstallmentKind#CUSTOM} charge, which is raised against one student and
+	 * belongs to no structure — and therefore carries no late fine, because there is no rule to read.
+	 */
 	private String structureId;
 
 	/** Names the installment of that structure. Part of the idempotency key. */
 	private String installmentName;
+
+	/**
+	 * What sort of charge this is. Null on an invoice raised before this field existed, which reads as
+	 * {@link InstallmentKind#MONTHLY} — read it through {@link #resolvedKind()}, never off the field.
+	 */
+	private InstallmentKind kind;
+
+	/**
+	 * How to show it — a register column heading, a receipt line. Snapshotted from the installment at
+	 * generation for the same reason the head names are: renaming a column next year must not restate
+	 * a receipt already issued. Null means "use {@link #installmentName}".
+	 */
+	private String label;
+
+	/** Free text an admin typed when raising a CUSTOM charge, e.g. which book was lost. Null otherwise. */
+	private String note;
 
 	private LocalDate dueDate;
 
@@ -91,5 +114,20 @@ public class Invoice {
 	/** Sum of the items before any concession, in paise. */
 	public long grossAmount() {
 		return items == null ? 0L : items.stream().mapToLong(InvoiceItem::amount).sum();
+	}
+
+	/** The kind, where a missing one means MONTHLY. See {@link InstallmentKind}. */
+	public InstallmentKind resolvedKind() {
+		return kind == null ? InstallmentKind.MONTHLY : kind;
+	}
+
+	/** What to display: the label if one was snapshotted, otherwise the installment name. */
+	public String displayLabel() {
+		return label == null || label.isBlank() ? installmentName : label;
+	}
+
+	/** Nothing has been taken against this invoice, as fee or as fine — the test a charge must pass to be deleted. */
+	public boolean untouched() {
+		return paidAmount == 0L && lateFinePaid == 0L;
 	}
 }

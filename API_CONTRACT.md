@@ -68,6 +68,12 @@ Response:
 
 - People log in with their **`uniqueId`**, not an email address. It is matched case-insensitively.
 - There is no self-signup. Admins create all accounts, and the initial password is issued by the admin.
+- **When the `studentLogin` module is off** (see §6), a STUDENT account is refused at login with 403
+  `FORBIDDEN` and a message saying so, and `/auth/refresh` refuses a student's existing cookie the
+  same way rather than renewing it for the week it has left. The opaque 401 exists to stop ID
+  enumeration and there is nothing to enumerate here — the answer is the same for every student and
+  is already published on `GET /public/school`, and a student told "incorrect password" would retry
+  all week. Staff and administrators are never affected, which is what makes the switch recoverable.
 
 ### Access token
 
@@ -221,7 +227,7 @@ satisfy RFC 7807. Individual errors may carry extra members beyond the table (fo
 | `INTERNAL_ERROR` | 500 | Unhandled server failure. Carries `errorId`; body never exposes internals. |
 | `DEPENDENCY_FAILED` | 502 | An upstream call failed — Razorpay, S3/MinIO, SMTP, the AI provider. |
 | `FEATURE_DISABLED` | 503 | The endpoint exists but is behind a feature flag that is off in this deployment, e.g. online payment when no gateway is configured. |
-| `FEATURE_DISABLED` | 404 | **Same code, 404 status.** The endpoint is behind a flag that is off and the route is meant to look absent — every `/ai` and `/public/ai` path when `app.features.ai` is false. Read `features` on `GET /public/school` and do not call them at all. |
+| `FEATURE_DISABLED` | 404 | **Same code, 404 status.** The endpoint is behind a switch that is off and the route is meant to look absent: every path of a module turned off in `school_config.modules`, and every `/ai` path when `app.features.ai` is false. Read `modules` on `GET /public/school` and do not call them at all — see §6. |
 
 Codes are additive: the frontend must have a fallback branch for a code it does not know.
 
@@ -258,6 +264,12 @@ The `Who` column gives access. "Self" means the user's own records only.
 ```json
 {
   "name": "Demo Vidya Mandir Senior Secondary School",
+  "institutionType": "SCHOOL",
+  "terms": { "institution": "School", "class": "Class", "section": "Section", "teacher": "Teacher" },
+  "modules": {
+    "exams": true, "quizzes": true, "examPapers": true, "notices": true,
+    "studentLogin": true, "onlinePayments": true, "landingPage": true, "ai": true
+  },
   "tagline": "Learn with curiosity, lead with character",
   "logoUrl": "https://media.example/public/logo/....png",
   "faviconUrl": "https://media.example/public/favicon/....ico",
@@ -297,7 +309,8 @@ The `Who` column gives access. "Self" means the user's own records only.
 }
 ```
 
-**Only `name`, `about`, `theme`, `stats`, `contact` and `features` are always present. Everything else is
+**Only `name`, `institutionType`, `terms`, `modules`, `about`, `theme`, `stats`, `contact` and
+`features` are always present. Everything else is
 optional and the key is omitted when the school has not filled it in** — including whole objects
 (`principal`, `academics`) and whole arrays (`highlights`, `facilities`, `galleryImageUrls`). Fields
 *inside* an optional object are independently optional too: a `principal` with only a `message` and no
@@ -306,8 +319,15 @@ content is missing, so render every section conditionally rather than assuming a
 
 | Field | Notes |
 |---|---|
+| `institutionType` | `SCHOOL` or `COLLEGE`. **Always present**, defaulting to `SCHOOL`. It changes nothing in the API — every behavioural difference is in `terms` or `modules` — so use it only to pick a default layout or icon set. |
+| `terms` | What this institution calls the four things every screen has a label for. **Always present and complete**: a word the configuration leaves out is filled in from the school defaults, so no key here is ever null. Use these for labels only — the data model stays `classId`, `section` and so on whatever the words are. |
+| `terms.class` | Note the key is `class`, not `classId`. A college sets `Course`; a school leaves `Class`. |
+| `terms.section` | A college sets `Year`; a school leaves `Section`. |
+| `terms.teacher` | A college sets `Faculty`; a school leaves `Teacher`. |
+| `modules` | Which optional modules are switched on. **Always present and complete**, every one defaulting to `true`. An endpoint behind a module that is off answers **404 `FEATURE_DISABLED`** — read this and hide the navigation entry rather than calling and handling the error. The paths each one covers are listed under §6. |
+| `modules.ai` | The **effective** value: it is `true` only when the institution has the module on *and* the deployment has `APP_FEATURES_AI=true`. It therefore always agrees with `features.ai`. |
 | `features` | Which optional features this deployment has. **Always present**, and the only object here that is not school content — it comes from the deployment's environment, not from `school_config`. Treat an unknown key inside it as absent-and-off. |
-| `features.ai` | `false` means every `/ai` and `/public/ai` endpoint answers 404 `FEATURE_DISABLED` in this deployment. Hide the AI entry points rather than calling them and handling the error. |
+| `features.ai` | `false` means every `/ai` and `/public/ai` endpoint answers 404 `FEATURE_DISABLED` in this deployment. Hide the AI entry points rather than calling them and handling the error. Kept for compatibility; it is the same value as `modules.ai`. |
 | `vision` | The school's vision statement. |
 | `principal` | `{name, designation, photoUrl, message}`, all optional. `designation` is what to print under the name (`Principal`, `Director`, …). |
 | `academics` | `{board, summary, levels}` — public, descriptive copy. `board` is worded by the school, not a code. |
@@ -321,8 +341,29 @@ days, grading scheme and school code are **not** in the public projection; they 
 Note that public `academics` (marketing copy) and internal `academicSettings` (how the school runs)
 are different things and only the first is public.
 
-`PUT /school/config` takes `{identity, landing, gradingScheme, academicSettings}` — the same shape
-`GET /school/config` returns, minus the read-only `code` and `updatedAt`. The school code cannot be
+When `modules.landingPage` is `false`, everything from `about` downwards — the whole marketing block,
+`contact` included — is **omitted**, and `name`, `institutionType`, `terms`, `modules`, `features`,
+`theme`, `logoUrl` and `faviconUrl` remain. The endpoint itself is never a 404: it is the only
+unauthenticated endpoint, so it is where a client learns what to put on the login screen and which
+navigation entries exist at all.
+
+`PUT /school/config` takes
+`{institutionType, terms, modules, identity, landing, gradingScheme, academicSettings}` — the same
+shape `GET /school/config` returns, minus the read-only `code` and `updatedAt`.
+
+The first three behave differently from the rest of this request: **what you do not send is not
+changed**, at both levels. Omitting `terms` entirely leaves the vocabulary alone; sending
+`{"terms": {"class": "Course"}}` changes that one word and leaves the other three. Omitting `modules`
+leaves every switch alone; sending `{"modules": {"quizzes": false}}` switches quizzes off and touches
+nothing else. Everything else in the body is a wholesale replacement as before. The reason for the
+exception is that these were added after the admin screen existed: a client that does not know about
+them sends neither, and that must not silently rename a college's courses back to "Class" or switch
+eight modules back on. To reset a word, send the school default explicitly.
+
+`GET /school/config` returns these three **resolved** — defaults filled in — so loading, editing and
+PUTting it back is always safe.
+
+The school code cannot be
 changed through the API: it comes from `SCHOOL_CODE` and every unique ID already issued is built from
 it. Grade bands must not overlap or repeat a label, and when `mode` is `GRADES` or `BOTH` they must
 cover 0–100 with no gap; a scheme that breaks this returns 400 with `errors[].field` of
@@ -457,6 +498,12 @@ from the student's invoices, with the rules under [Fees](#fees).
 ```
 
 → 201 `{uniqueId, temporaryPassword, student}` where `student` is a `StudentAdminView`.
+
+**When the `studentLogin` module is off** (see §6) admission creates **no login**, and
+`temporaryPassword` is absent from the response — there is no account, so there is nothing to hand
+over. The student record itself is identical either way, and `uniqueId` still identifies them on
+every register, invoice and receipt. `POST /students/{uniqueId}/reset-password` is then 422 with an
+explanation rather than a confusing 404 on a user that was never created.
 
 `enrollment.sessionId` is **not** in the body: it is always the active session, so a request cannot
 file this year's admission under last year. 422 `UNPROCESSABLE` if no session is active.
@@ -745,7 +792,9 @@ not in this response and, as everywhere else, are never logged or audited. `GET
 /imports/credentials/{id}` streams it back with `Cache-Control: no-store`. It is stored privately,
 never at a public URL, and a **scheduled job deletes it 24 hours after the import**, after which that
 endpoint is 404. `credentialsFileId` is `null` when the import created no logins at all — a file of
-staff who are all `Can Login = NO`.
+staff who are all `Can Login = NO`, or a **student import while the `studentLogin` module is off**
+(see §6), which creates the students and no accounts. `created` still counts every student written;
+a credentials file of blank passwords would read as the import having gone wrong.
 
 **Audit.** One `STUDENTS_IMPORTED` or `EMPLOYEES_IMPORTED` entry per import, holding the **counts
 only** and the credentials file id; each imported person also gets their own `STUDENT_CREATED` /
@@ -1150,15 +1199,23 @@ Create, update and delete are written to `audit_logs`, with the deleted notice k
 | GET | `/fees/structures/{id}` | `FEE_MANAGE` (ADMIN) |
 | POST | `/fees/structures` | `FEE_MANAGE` (ADMIN) |
 | PUT | `/fees/structures/{id}` | `FEE_MANAGE` (ADMIN) |
+| POST | `/fees/structures/monthly` | `FEE_MANAGE` (ADMIN). A year of monthly fees in one call |
+| POST | `/fees/structures/{id}/one-time-fees` | `FEE_MANAGE` (ADMIN). A course-wide one-off fee |
+| PUT | `/fees/structures/{id}/one-time-fees/{name}` | `FEE_MANAGE` (ADMIN) |
+| DELETE | `/fees/structures/{id}/one-time-fees/{name}` | `FEE_MANAGE` (ADMIN). Only while unpaid |
 | POST | `/fees/structures/{id}/generate-invoices` | `FEE_MANAGE` (ADMIN). Idempotent |
+| POST | `/fees/charges` | `FEE_MANAGE` (ADMIN). One-off charges for named students |
+| DELETE | `/fees/charges/{invoiceId}` | `FEE_MANAGE` (ADMIN). Only while unpaid |
 | GET | `/fees/concessions?studentUniqueId=` | `FEE_MANAGE` (ADMIN) |
 | POST | `/fees/concessions` | `FEE_MANAGE` (ADMIN) |
 | POST | `/fees/concessions/{id}/apply` | `FEE_MANAGE` (ADMIN) |
 | GET | `/fees/students/{uniqueId}` | ADMIN, or that student. **A teacher gets 403** |
 | GET | `/fees/students/{uniqueId}/status` | `FEE_READ_STATUS` (ADMIN, TEACHER) for anybody; a student for themselves |
+| GET | `/fees/register?classId=&section=&sessionId=` | `FEE_MANAGE` (ADMIN). The collection register as a grid |
+| POST | `/fees/register/mark-paid` | `FEE_MANAGE` (ADMIN). Settles the ticked cells in full |
 | POST | `/fees/offline-payment` | `FEE_MANAGE` (ADMIN). Cash, cheque, UPI or transfer taken at the counter |
-| GET | `/fees/reports/collection?from=&to=` | `FEE_MANAGE` (ADMIN) |
-| GET | `/fees/reports/defaulters?sessionId=&classId=` | `FEE_MANAGE` (ADMIN) |
+| GET | `/fees/reports/collection?from=&to=&kind=` | `FEE_MANAGE` (ADMIN) |
+| GET | `/fees/reports/defaulters?sessionId=&classId=&kind=&month=` | `FEE_MANAGE` (ADMIN) |
 
 **Every amount in this section is an integer of paise** — `150000` is ₹1,500.00. There are no decimals
 anywhere, in requests or responses (CLAUDE.md rule 3). Amounts a client sends are only ever *setup*
@@ -1179,8 +1236,8 @@ One structure says what **one class pays in one session**, split into installmen
 {
   "classId": "66f0...",
   "installments": [
-    { "name": "Q1", "dueDate": "2026-04-10",
-      "items": [ { "headId": "66f1...", "amount": 1200000 },
+    { "name": "Q1", "dueDate": "2026-04-10", "kind": "MONTHLY", "label": null,
+      "items": [ { "headId": "66f1...", "amount": 1200000, "sectionAmounts": { "B": 1100000 } },
                  { "headId": "66f2...", "amount": 300000 } ] }
   ],
   "lateFine": { "type": "PER_DAY", "amount": 2000, "graceDays": 7, "cap": 50000 }
@@ -1188,11 +1245,25 @@ One structure says what **one class pays in one session**, split into installmen
 ```
 
 → `{id, sessionId, classId, className, installments, lateFine, yearTotal, createdAt, updatedAt}`,
-where each installment comes back as `{name, dueDate, items:[{headId, headName, amount}], total}`.
-Totals are pre-computed so the frontend never adds money up itself.
+where each installment comes back as
+`{name, label, kind, dueDate, items:[{headId, headName, amount, sectionAmounts}], total}`.
+Totals are pre-computed so the frontend never adds money up itself. Installments come back in
+**register order** — the `MONTHLY` ones by due date, then the `ONE_TIME` ones by due date — whatever
+order they were written in.
 
 - `sessionId` is **not** in the body: a structure always belongs to the active session, the same
-  stance as exams. 422 `UNPROCESSABLE` if no session is active.
+  stance as exams. 422 `UNPROCESSABLE` if no session is active. (`POST /fees/structures/monthly`
+  below is the one exception and does take an optional `sessionId`.)
+- `kind` is `MONTHLY` or `ONE_TIME`, **defaulting to `MONTHLY`** — which is also what every
+  installment stored before this field existed reads as, so nothing about an existing deployment
+  changes. `CUSTOM` is rejected here (400): a charge for named students is not part of a structure,
+  and belongs to `POST /fees/charges`.
+- `label` is optional and is what to head a register column with when it differs from `name`. The
+  response always carries a usable `label`, falling back to the name.
+- `items[].sectionAmounts` is optional: section name → the amount that section pays **instead of**
+  `amount`, in paise. Every key must be a section the class actually has, or 400 `VALIDATION_ERROR`;
+  keys are upper-cased to match how sections are stored. This is how Year 1 and Year 2 of one course
+  charge differently without being split into two courses. Omit it and every section pays `amount`.
 - **One structure per (session, class)**, enforced by a unique index → 409 `CONFLICT` on a second
   one. "What does Class 5 pay this year" has to have exactly one answer.
 - Every `headId` must exist **and still be active**, installment names must be unique within the
@@ -1206,6 +1277,99 @@ Totals are pre-computed so the frontend never adds money up itself.
 - Editing amounts or due dates does **not** rewrite invoices already generated — an invoice is a
   statement of what was charged. Editing `lateFine` **does** affect every invoice immediately,
   because the fine is read live rather than stored.
+
+#### Monthly fee setup
+`POST /fees/structures/monthly` writes a run of `MONTHLY` installments — one per month, named
+`"Jul 2026"` — into the structure for that session and class, **creating the structure if there is
+none**. It is a convenience over `POST /fees/structures`, not a second model; nobody wants to type
+twelve installments.
+
+```json
+{
+  "sessionId": null,
+  "classId": "66f0...",
+  "headId": "66f1...",
+  "monthlyAmount": 250000,
+  "sectionAmounts": { "1": 250000, "2": 275000 },
+  "startMonth": "2026-07",
+  "months": 12,
+  "dueDay": 10
+}
+```
+
+→ `{monthsCreated, monthsUpdated, monthsSkipped, structure}`, where `structure` is the full fee
+structure in the shape above.
+
+- `sessionId` is optional and defaults to the active session; a session id that does not exist is
+  404. `months` defaults to **12** (1–24), `dueDay` to the **10th** (1–31), clamped to the length of
+  each month so `31` is the 28th in February.
+- `startMonth` is `"YYYY-MM"`. Installment names are `"MMM yyyy"` in English — `"Jul 2026"`,
+  `"Aug 2026"` — because the name is an identifier the idempotency key is built from, not a label.
+- **Run it again to correct the figure.** A month the structure does not have is added
+  (`monthsCreated`). A month it has with no invoices yet takes the new amount (`monthsUpdated`). A
+  month that **already has invoices is left exactly as it is** (`monthsSkipped`) — an invoice states
+  what a family was charged, and the way to change one is a concession or a credit, not an edit.
+- Only this `headId` is touched. Other heads already on those months — a transport fee somebody added
+  by hand — are left alone.
+- **Nothing is billed here.** Run `generate-invoices` afterwards; it is idempotent and will raise
+  exactly the months it has not raised yet.
+
+#### Course-wide one-off fees
+`POST /fees/structures/{id}/one-time-fees` adds a `ONE_TIME` installment — an admission fee, a
+laboratory deposit — that every student of the class pays once.
+
+```json
+{ "name": "Admission fee", "headId": "66f1...", "amount": 500000,
+  "sectionAmounts": { "1": 500000 }, "dueDate": "2026-07-10" }
+```
+
+→ 201 with the full structure. `PUT /fees/structures/{id}/one-time-fees/{name}` edits one and
+`DELETE` removes it; both take the installment name in the path and both return the structure as it
+then stands.
+
+- 409 `CONFLICT` if an installment of that name already exists — names are unique within a structure.
+- `PUT` may change the head, amount, section overrides and due date freely. Invoices already raised
+  keep the amounts they were issued with, exactly as for any other structure edit. **Renaming is
+  refused (422) once the fee has invoices**, because the name is part of the idempotency key.
+- `PUT` and `DELETE` are 422 if the named installment is a `MONTHLY` month rather than a one-off fee —
+  months are managed through `POST /fees/structures/monthly` or `PUT /fees/structures/{id}`.
+- `DELETE` removes the installment **and the invoices raised from it**, and is refused (422) if a
+  single rupee has been taken against any of them. This is the one place in fees where invoices are
+  deleted rather than cancelled: nothing points at a fee nobody has paid towards, and leaving two
+  hundred cancelled rows behind would make every register harder to read for no gain. It is audited
+  as `FEE_ONE_TIME_FEE_DELETED` with the count.
+- **Running `generate-invoices` again raises this fee and nothing else**, because every month already
+  has its invoices and the unique index counts those as `skipped`.
+
+#### Individual charges
+`POST /fees/charges` raises a `CUSTOM` invoice per named student — a fine, a trip, a replacement book.
+These belong to no structure.
+
+```json
+{ "studentUniqueIds": ["DEMO-STU-26-00142", "DEMO-STU-26-00143"],
+  "name": "Late library fine", "headId": "66f1...", "amount": 5000,
+  "dueDate": "2026-10-20", "note": "Two weeks overdue on 'Wings of Fire'" }
+```
+
+→ 201 `{created, charges:[{invoiceId, studentUniqueId, studentName, installmentName, label, amount}]}`.
+
+- **All or nothing**: an unknown student id, a student listed twice, or a retired head rejects the
+  whole request with every problem listed (400), rather than charging eleven of the twelve students
+  somebody pasted in. The writes then run in one transaction.
+- One amount for everybody named. Two students owing different amounts are two requests.
+- **No concession is applied.** A concession reduces the *fees* a family was assessed; a fine is not
+  that, and quietly waiving half of one because the student has a sibling discount would be wrong.
+- **No late fine, ever.** A `CUSTOM` invoice has no structure behind it and therefore no rule to read,
+  so its `lateFineDue` is always 0. `dueDate` is for the register and the reminder.
+- `installmentName` is `name` with a numeric suffix — `"Late library fine (2)"` — when that student
+  already has a charge of the same name, because the unique index does not allow two. `label` is
+  always what was asked for, and `label` is what a receipt and a register print.
+- They appear on `GET /fees/students/{uniqueId}` alongside the monthly fees with no special handling,
+  are paid through the ordinary counter and gateway flows, and land in the collection report under
+  their own head.
+- `DELETE /fees/charges/{invoiceId}` → 204, only while nothing has been paid against it (422
+  otherwise) and only for a `CUSTOM` invoice (422 for one raised from a structure). Audited as
+  `FEE_CHARGE_DELETED`.
 
 #### Generating invoices
 `POST /fees/structures/{id}/generate-invoices` → `{"created": 160, "skipped": 0}`.
@@ -1224,12 +1388,17 @@ Returned by `/fees/students/{uniqueId}`, never created directly:
 ```json
 { "id": "66f3...", "studentUniqueId": "DEMO-STU-26-00142", "classId": "66f0...",
   "sessionId": "66ef...", "structureId": "66f2...", "installmentName": "Q1",
+  "label": "Q1", "kind": "MONTHLY", "note": null,
   "dueDate": "2026-04-10", "items": [ { "headId": "66f1...", "headName": "Tuition", "amount": 1200000 } ],
   "grossAmount": 1500000, "concessionAmount": 150000, "netAmount": 1350000,
   "paidAmount": 0, "lateFinePaid": 0, "lateFineDue": 14000, "balance": 1364000,
   "overdue": true, "status": "UNPAID" }
 ```
 
+- `kind` is `MONTHLY` | `ONE_TIME` | `CUSTOM` and is **always present**: an invoice stored before this
+  field existed is reported as the `MONTHLY` it is. `structureId` is `null` for a `CUSTOM` charge, and
+  only for one. `label` is what to print and is never null. `note` is only ever set on a `CUSTOM`
+  charge and is omitted otherwise.
 - `status` is `UNPAID` | `PARTIAL` | `PAID` | `CANCELLED`. An invoice whose `netAmount` is 0 — a full
   waiver — is raised as `PAID`. `CANCELLED` is how an invoice stops counting (a student who left,
   or one raised by mistake); it is still listed as history but is left out of every total and accrues
@@ -1310,9 +1479,90 @@ Tested in this order, over every invoice that is not cancelled:
 `OVERDUE` beats `PARTIAL` on purpose: a part-paid invoice that is late is still late, and late is the
 actionable answer.
 
+#### Fee register
+`GET /fees/register?classId=&section=&sessionId=` → the sheet the office works from: a row per
+student, a column per month and then per one-off fee, a cell saying whether that month is in.
+`classId` is required; `section` narrows to one section and `sessionId` defaults to the active
+session.
+
+```json
+{
+  "sessionId": "66ef...", "classId": "66f0...", "className": "B.Com", "section": "1",
+  "columns": [
+    { "key": "Jul 2026", "label": "Jul 2026", "kind": "MONTHLY", "dueDate": "2026-07-10" },
+    { "key": "Aug 2026", "label": "Aug 2026", "kind": "MONTHLY", "dueDate": "2026-08-10" },
+    { "key": "Admission fee", "label": "Admission fee", "kind": "ONE_TIME", "dueDate": "2026-07-10" }
+  ],
+  "rows": [
+    { "uniqueId": "DEMO-STU-26-00142", "name": "Aarav Sharma", "rollNo": 7,
+      "cells": {
+        "Jul 2026": { "invoiceId": "66f3...", "amount": 250000, "balance": 0, "status": "PAID" },
+        "Aug 2026": { "invoiceId": "66f4...", "amount": 250000, "balance": 250000, "status": "OVERDUE" },
+        "Admission fee": { "invoiceId": "66f5...", "amount": 500000, "balance": 100000, "status": "PARTIAL" }
+      },
+      "otherCharges": { "count": 1, "totalBalance": 5000, "items": [
+        { "invoiceId": "66f6...", "label": "Late library fine", "note": "Two weeks overdue",
+          "dueDate": "2026-10-20", "amount": 5000, "balance": 5000, "status": "UNPAID" } ] },
+      "totals": { "due": 1005000, "paid": 650000, "balance": 355000 } }
+  ],
+  "footer": {
+    "columns": [ { "key": "Jul 2026", "label": "Jul 2026", "collected": 250000, "pending": 0 } ],
+    "otherCharges": { "key": "otherCharges", "label": "Other charges", "collected": 0, "pending": 5000 },
+    "grandTotals": { "due": 1005000, "paid": 650000, "balance": 355000 }
+  }
+}
+```
+
+- **Columns are in display order**: the class's `MONTHLY` installments by due date, then its
+  `ONE_TIME` fees by due date. `key` is the installment name and is what `cells` is keyed by.
+- **A column a student has no invoice for has no entry in `cells` at all.** That is a real state and
+  not the same as unpaid — a student admitted in November has no July invoice — so render a blank
+  cell rather than a zero.
+- Cell `status` is `PAID` | `PARTIAL` | `UNPAID` | `OVERDUE`. It is *not* the invoice's stored
+  `status`: there is no `CANCELLED` (cancelled invoices are left out of the register entirely, as
+  they are out of every other total) and there is an `OVERDUE`, which wins over `PARTIAL` for
+  anything past its due date with a balance.
+- `otherCharges` carries that student's `CUSTOM` charges, which have no column because they are
+  nobody else's. `count` is every charge on them this session, settled or not; `totalBalance` is
+  what is still owed across them.
+- **Late fines are deliberately in no figure here**, so that `due − paid = balance` holds in every
+  row, every column and the footer, and two readings of the sheet agree. The fine is still charged —
+  `mark-paid` and `GET /fees/students/{uniqueId}` both include it, computed at the moment of
+  payment — it simply is not a column.
+- Rows are the **ACTIVE** students in roll order. A class with no fee structure yet is not an error:
+  `columns` comes back empty and the rows still list the students and their individual charges.
+- An invoice from *another* structure — a student moved courses mid-year — has no column here and is
+  left out of the row totals too, so the sheet reconciles by eye. It is still on that student's own
+  ledger, which is where a per-student question belongs.
+
+#### Settling the register
+`POST /fees/register/mark-paid` takes:
+
+```json
+{ "invoiceIds": ["66f4...", "66f5..."], "mode": "CASH", "reference": null,
+  "paidOn": "2026-10-18", "payerName": "Rajesh Sharma", "payerRelation": "FATHER" }
+```
+
+→ 201 with a `Payment` (below), exactly as `POST /fees/offline-payment` returns: one receipt listing
+every month and fee it covered.
+
+- **There is no `amount`, and there cannot be.** The server quotes the invoices itself — outstanding
+  principal plus whatever late fine is running today — and takes exactly that. CLAUDE.md rule 4 in
+  its strongest form: the client cannot even express a figure.
+- **Every invoice must be the same student's** → 400 otherwise. One payment has one payer and
+  produces one receipt, and a receipt listing two families' months is not a document anybody can
+  file.
+- `mode` defaults to `CASH` and `payerRelation` to `OTHER`; `reference` is still required for every
+  mode but `CASH`, and `ONLINE` is still rejected. `paidOn` is a **date**, resolved at the start of
+  that day in the school's timezone, and defaults to today.
+- An invoice that is already settled or cancelled is refused rather than quietly dropped (400) — a
+  stale register is better corrected than silently part-charged.
+- **For a part payment, use `POST /fees/offline-payment`**, which takes an `amount`, works on a single
+  invoice as well as several, and leaves the invoice `PARTIAL`.
+
 #### Defaulters
-`GET /fees/reports/defaulters?sessionId=&classId=` → an array, **not** paged. Defaults to the active
-session; omit `classId` for the whole school.
+`GET /fees/reports/defaulters?sessionId=&classId=&kind=&month=` → an array, **not** paged. Defaults to
+the active session; omit `classId` for the whole school.
 
 ```json
 [ { "studentUniqueId": "DEMO-STU-26-00142", "name": "Aarav Sharma", "classId": "66f0...",
@@ -1325,6 +1575,17 @@ first** — the office chases whoever has been behind longest, not whoever owes 
 balance first on a tie. Only `UNPAID` and `PARTIAL` invoices count. A student whose record has since
 been removed is still listed, by id, with a null `name`: money owed does not stop being owed because
 the roll was edited.
+
+Both filters are optional and compose:
+
+| Filter | Notes |
+|---|---|
+| `kind` | `MONTHLY`, `ONE_TIME` or `CUSTOM`. Chase the fees alone, or the admission fees, or the unpaid fines. |
+| `month` | `"2026-10"`. Only invoices **falling due in that month** count, which is how "who has not paid Oct 2026" is answered. An invoice with no due date is never picked up by a month filter. |
+
+**Every figure in a row counts only the invoices that got through the filters**, so a filtered
+`balance` is smaller than that student's real one and `invoiceCount` smaller than their real count.
+Read a filtered report as "what these students owe *for this*", not as their position overall.
 
 #### Recording a payment taken at the counter
 `POST /fees/offline-payment` takes:
@@ -1440,12 +1701,12 @@ Fifty Thousand Only" — lakh and crore, never "one hundred fifty thousand"), th
 simply left out; the receipt is never refused over branding.
 
 #### Collection report
-`GET /fees/reports/collection?from=&to=` — **both dates inclusive**, resolved in the school's own
+`GET /fees/reports/collection?from=&to=&kind=` — **both dates inclusive**, resolved in the school's own
 timezone (`app.timezone`), so "today's collection" means the school's day and not UTC's. Defaults to
 the current month to date. The range may not exceed 400 days, and `to` before `from` is 400.
 
 ```json
-{ "from": "2026-04-01", "to": "2026-04-30",
+{ "from": "2026-04-01", "to": "2026-04-30", "kind": null,
   "totalCollected": 4092000, "principalCollected": 4050000, "lateFineCollected": 42000,
   "paymentCount": 3,
   "byMode": [ { "mode": "CHEQUE", "amount": 2728000, "paymentCount": 2 },
@@ -1468,6 +1729,12 @@ the current month to date. The range may not exceed 400 days, and `to` before `f
   days with no payments** rather than padding them with zeros.
 - Every figure is a sum of values stored on the payments when they were taken, never re-derived from
   invoices — so last month's report still says the same thing after somebody corrects a structure.
+- `kind` reports one sort of charge only: `MONTHLY` for the recurring fees, `ONE_TIME` for admission
+  fees and deposits, `CUSTOM` for individual charges and fines. **Every figure then counts only the
+  allocations of that kind**, a payment touching none of it is left out of `paymentCount` entirely,
+  and `totalCollected` becomes exactly `principalCollected + lateFineCollected` — there is no
+  unallocated remainder to attribute to a kind. The response echoes the filter back as `kind`, which
+  is `null` for the unfiltered report. Omit it and the behaviour is exactly as it was.
 
 Heads, structures, concessions, generation runs, every recalculation, every payment and every
 receipt first rendered are written to `audit_logs`.
@@ -2038,3 +2305,76 @@ a provider failure is *not* a 502.
 `APP_FEATURES_AI`, `AI_API_KEY`, `AI_MODEL` (default `gpt-4o-mini`) and `AI_TIMEOUT` (default `30s`).
 OpenAI is the one provider wired in; changing it is a dependency change, not a setting. The key is
 never logged and is not returned by any endpoint, including `GET /school/config`.
+
+## 6. Modules and institution vocabulary
+
+Every deployment is one institution, and not every institution wants the whole product. Which parts
+are switched on lives in `school_config.modules`, and what the institution *calls* things lives in
+`school_config.terms`. Both are published on `GET /public/school` (§5) and edited through
+`PUT /school/config`.
+
+**All eight modules default to `true`.** A deployment configured before any of this existed has no
+`modules` subdocument at all, which reads as everything on — so nothing about a school already
+running changes, and switching something off is always a deliberate act by an administrator.
+
+### What each module covers
+
+| Module | Paths that answer 404 `FEATURE_DISABLED` when it is off |
+|---|---|
+| `exams` | `/exams/**` (exams, marks, exam results), `/students/{uniqueId}/results`, `/students/{uniqueId}/report-card/**` |
+| `quizzes` | `/quizzes/**`, including attempts |
+| `examPapers` | `/exam-papers/**`. Separate from `exams` on purpose: an institution can run exams on paper and still not want an upload vault |
+| `notices` | `/notices/**` and `/public/notices/**` |
+| `onlinePayments` | `/payments/orders`, `/payments/verify`, `/public/payments/webhook` |
+| `ai` | `/ai/**` and `/public/ai/**`, in addition to the `APP_FEATURES_AI` environment switch |
+| `studentLogin` | No path. It changes behaviour instead — see below |
+| `landingPage` | No path. `GET /public/school` omits the landing block instead — see §5 |
+
+Deliberately **not** gated, whatever is switched off:
+
+- `GET /public/school` — the only unauthenticated endpoint, and how a client learns what is off.
+- `GET`/`PUT /school/config` — how an administrator switches something back on. The switch must not
+  be able to lock itself.
+- `POST /fees/offline-payment`, `POST /fees/register/mark-paid` and `GET /fees/register` — an
+  institution that takes no card payments still takes money at the desk. `onlinePayments` is about
+  the gateway, not about fees.
+- `GET /payments/{id}/receipt.pdf` — a receipt for money already taken keeps downloading forever,
+  whatever has been turned off since.
+
+### `studentLogin`
+
+Off means students exist as records but not as accounts:
+
+- `POST /students` and `POST /students/import` create **no user** and issue **no temporary password**
+  (§5, Students and Bulk import).
+- An existing STUDENT account is refused at `/auth/login` and `/auth/refresh` with 403 `FORBIDDEN`
+  (§2).
+- `POST /students/{uniqueId}/reset-password` is 422.
+- Nothing else changes. Students are still admitted, still on every register, still billed, and
+  still receipted — the office does for them what they would otherwise do for themselves.
+
+Switching it back on does not retroactively create accounts for students admitted while it was off;
+`reset-password` starts working again only for students who have an account. Re-admitting is not the
+answer — if that case comes up, it needs an endpoint it does not yet have.
+
+### Vocabulary (`terms`)
+
+`terms` is **labels only**. The data model, the URLs and the field names stay `classId`, `section`,
+`rollNo` and so on whatever the words are: renaming those would mean forking half the API for a
+vocabulary change, and would make the two deployments genuinely different products rather than one
+product configured two ways.
+
+| Key | School default | A college typically sets |
+|---|---|---|
+| `institution` | `School` | `College` |
+| `class` | `Class` | `Course` |
+| `section` | `Section` | `Year` |
+| `teacher` | `Teacher` | `Faculty` |
+
+So for a college, `GET /classes` lists courses, a class's `sections` are its years, and
+`PUT /classes/{id}/assignments` assigns faculty — the same endpoints, labelled differently. A course
+whose years charge different fees uses `sectionAmounts` on the fee structure (§5, Fee structures)
+rather than a course per year.
+
+`institutionType` (`SCHOOL` | `COLLEGE`) is alongside these and changes no behaviour at all; use it
+only to pick a default layout or icon set.

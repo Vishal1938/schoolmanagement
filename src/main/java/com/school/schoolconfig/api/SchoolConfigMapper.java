@@ -4,7 +4,9 @@ import com.school.schoolconfig.domain.AcademicSettings;
 import com.school.schoolconfig.domain.GradingScheme;
 import com.school.schoolconfig.domain.Identity;
 import com.school.schoolconfig.domain.Landing;
+import com.school.schoolconfig.domain.Modules;
 import com.school.schoolconfig.domain.SchoolConfig;
+import com.school.schoolconfig.domain.Terms;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 import org.mapstruct.ReportingPolicy;
@@ -22,6 +24,15 @@ public interface SchoolConfigMapper {
 
 	// --- document -> DTO -------------------------------------------------------------------------
 
+	/**
+	 * {@code institutionType}, {@code terms} and {@code modules} come from the {@code resolved}
+	 * accessors rather than straight from the fields, so an admin screen loads the values in force
+	 * instead of the nulls a document seeded before they existed actually holds. Loading and PUTting
+	 * that response back is then what writes the defaults down.
+	 */
+	@Mapping(target = "institutionType", expression = "java(config.resolvedInstitutionType())")
+	@Mapping(target = "terms", expression = "java(config.resolvedTerms())")
+	@Mapping(target = "modules", expression = "java(config.resolvedModules())")
 	SchoolConfigResponse toResponse(SchoolConfig config);
 
 	/**
@@ -49,7 +60,11 @@ public interface SchoolConfigMapper {
 	@Mapping(target = "mapEmbedUrl", source = "config.landing.mapEmbedUrl")
 	@Mapping(target = "socialLinks", source = "config.landing.socialLinks")
 	@Mapping(target = "features", source = "features")
-	PublicSchoolResponse toPublicResponse(SchoolConfig config, PublicSchoolResponse.Features features);
+	@Mapping(target = "institutionType", expression = "java(config.resolvedInstitutionType())")
+	@Mapping(target = "terms", expression = "java(config.resolvedTerms())")
+	@Mapping(target = "modules", source = "modules")
+	PublicSchoolResponse toPublicResponse(SchoolConfig config, PublicSchoolResponse.Features features,
+			Modules modules);
 
 	// --- request -> document parts ---------------------------------------------------------------
 
@@ -60,4 +75,55 @@ public interface SchoolConfigMapper {
 	GradingScheme toGradingScheme(SchoolConfigRequest.GradingScheme gradingScheme);
 
 	AcademicSettings toAcademicSettings(SchoolConfigRequest.AcademicSettings academicSettings);
+
+	/**
+	 * The vocabulary to store, given what was asked for and what is there now.
+	 *
+	 * <p><strong>What is not sent is not changed.</strong> {@code PUT /school/config} replaces the rest
+	 * of the configuration wholesale, but these two were added after the admin screen existed: a client
+	 * that does not know about them yet sends neither, and that must not silently rename a college's
+	 * courses back to "Class". The way to reset a word is to send the school default, not to omit it.
+	 */
+	default Terms toTerms(SchoolConfigRequest.Terms requested, Terms current) {
+		Terms base = current == null ? Terms.SCHOOL : current.withDefaults();
+		if (requested == null) {
+			return base;
+		}
+		return new Terms(
+				keep(requested.institution(), base.institution()),
+				keep(requested.schoolClass(), base.schoolClass()),
+				keep(requested.section(), base.section()),
+				keep(requested.teacher(), base.teacher()));
+	}
+
+	/**
+	 * The module switches to store, under the same "not sent is not changed" rule — at both levels, so
+	 * sending three switches changes three.
+	 *
+	 * <p>Written by hand rather than generated because MapStruct would unbox an absent {@link Boolean}
+	 * into the {@code false} of the primitive field, which is the opposite of what omitting it means.
+	 */
+	default Modules toModules(SchoolConfigRequest.Modules requested, Modules current) {
+		Modules base = current == null ? Modules.ALL_ON : current;
+		if (requested == null) {
+			return base;
+		}
+		return new Modules(
+				keep(requested.exams(), base.exams()),
+				keep(requested.quizzes(), base.quizzes()),
+				keep(requested.examPapers(), base.examPapers()),
+				keep(requested.notices(), base.notices()),
+				keep(requested.studentLogin(), base.studentLogin()),
+				keep(requested.onlinePayments(), base.onlinePayments()),
+				keep(requested.landingPage(), base.landingPage()),
+				keep(requested.ai(), base.ai()));
+	}
+
+	private static String keep(String requested, String current) {
+		return requested == null || requested.isBlank() ? current : requested.trim();
+	}
+
+	private static boolean keep(Boolean requested, boolean current) {
+		return requested == null ? current : requested;
+	}
 }

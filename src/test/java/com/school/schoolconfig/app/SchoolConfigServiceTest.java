@@ -104,11 +104,7 @@ class SchoolConfigServiceTest {
 				.thenReturn(Optional.of(SchoolConfigFixtures.seeded(SCHOOL_CODE, seededAt)));
 		when(repository.save(any(SchoolConfig.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-		SchoolConfigRequest request = SchoolConfigFixtures.validRequest();
-		SchoolConfigRequest renamed = new SchoolConfigRequest(
-				new SchoolConfigRequest.Identity("Renamed School", request.identity().tagline(),
-						request.identity().logoUrl(), request.identity().faviconUrl(), request.identity().theme()),
-				request.landing(), request.gradingScheme(), request.academicSettings());
+		SchoolConfigRequest renamed = renamedTo("Renamed School");
 
 		SchoolConfig updated = service.update(renamed);
 
@@ -124,13 +120,7 @@ class SchoolConfigServiceTest {
 		when(repository.findById(SchoolConfig.SINGLETON_ID)).thenReturn(Optional.of(before));
 		when(repository.save(any(SchoolConfig.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-		SchoolConfigRequest request = SchoolConfigFixtures.validRequest();
-		SchoolConfigRequest renamed = new SchoolConfigRequest(
-				new SchoolConfigRequest.Identity("Renamed School", request.identity().tagline(),
-						request.identity().logoUrl(), request.identity().faviconUrl(), request.identity().theme()),
-				request.landing(), request.gradingScheme(), request.academicSettings());
-
-		service.update(renamed);
+		service.update(renamedTo("Renamed School"));
 
 		org.mockito.ArgumentCaptor<SchoolConfig> beforeState = org.mockito.ArgumentCaptor.forClass(SchoolConfig.class);
 		org.mockito.ArgumentCaptor<SchoolConfig> afterState = org.mockito.ArgumentCaptor.forClass(SchoolConfig.class);
@@ -242,9 +232,19 @@ class SchoolConfigServiceTest {
 		assertThat(service.gradeFor(0).grade()).isEqualTo("E");
 	}
 
+	/** The valid request with only the school's name changed. */
+	private SchoolConfigRequest renamedTo(String name) {
+		SchoolConfigRequest request = SchoolConfigFixtures.validRequest();
+		return new SchoolConfigRequest(request.institutionType(), request.terms(), request.modules(),
+				new SchoolConfigRequest.Identity(name, request.identity().tagline(),
+						request.identity().logoUrl(), request.identity().faviconUrl(), request.identity().theme()),
+				request.landing(), request.gradingScheme(), request.academicSettings());
+	}
+
 	private SchoolConfigRequest withBands(GradingMode mode, SchoolConfigRequest.GradeBand... bands) {
 		SchoolConfigRequest request = SchoolConfigFixtures.validRequest();
-		return new SchoolConfigRequest(request.identity(), request.landing(),
+		return new SchoolConfigRequest(request.institutionType(), request.terms(), request.modules(),
+				request.identity(), request.landing(),
 				new SchoolConfigRequest.GradingScheme(mode, List.of(bands)), request.academicSettings());
 	}
 }

@@ -8,7 +8,11 @@ package com.school.people.api;
  * read it back — an admin who loses it calls
  * {@code POST /students/{uniqueId}/reset-password} for a new one.
  *
- * @param uniqueId what the student logs in with; the same ID as the student record
+ * <p>It is <strong>null</strong>, and omitted from the JSON, when the {@code studentLogin} module is
+ * off: there is no account, so there is nothing to hand over. The student record is identical either
+ * way, and {@code uniqueId} still identifies them on every register and receipt.
+ *
+ * @param uniqueId what the student logs in with, where they can; the same ID as the student record
  */
 public record StudentCreatedResponse(
 		String uniqueId,

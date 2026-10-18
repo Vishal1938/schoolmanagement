@@ -18,6 +18,7 @@ import com.school.common.security.CurrentUser;
 import com.school.common.security.Permission;
 import com.school.fees.app.InvoiceAllocation;
 import com.school.fees.app.InvoiceService;
+import com.school.payment.api.MarkPaidRequest;
 import com.school.payment.api.OfflinePaymentRequest;
 import com.school.payment.domain.HeadAllocation;
 import com.school.payment.domain.Payment;
@@ -122,6 +123,31 @@ public class PaymentService {
 
 		audit.record(AuditAction.PAYMENT_RECORDED, AUDIT_ENTITY, saved.getId(), null, saved);
 		return saved;
+	}
+
+	/**
+	 * Settles the invoices ticked on the fee register, in full, as one counter payment.
+	 *
+	 * <p>The same transaction, the same allocation, the same receipt numbering and the same audit entry
+	 * as {@link #record}: this works out the amount and then calls it, rather than being a second way
+	 * to take money. One receipt comes out listing every month and fee it covered, which is what the
+	 * office hands over when a family clears four months at once.
+	 *
+	 * <p><strong>The amount is not in the request and cannot be.</strong> It is quoted here from the
+	 * invoices and today's late fine, so there is nothing for a client to get wrong or to tamper with.
+	 * Paying part of a single month is {@code POST /fees/offline-payment}, which does take an amount.
+	 */
+	@Transactional
+	public Payment markPaid(MarkPaidRequest request) {
+		InvoiceService.CounterQuote quote = invoices.quoteForCounter(request.invoiceIds());
+		// Midnight of that day in the school's own zone, not UTC's: in India the difference puts an
+		// evening payment into the previous day's collection report.
+		Instant paidAt = request.paidOn() == null
+				? Instant.now(clock)
+				: request.paidOn().atStartOfDay(clock.getZone()).toInstant();
+		return record(new OfflinePaymentRequest(quote.studentUniqueId(), quote.invoiceIds(), quote.amountDue(),
+				request.modeOrDefault(), request.reference(), request.payerName(),
+				request.payerRelationOrDefault(), paidAt));
 	}
 
 	/**

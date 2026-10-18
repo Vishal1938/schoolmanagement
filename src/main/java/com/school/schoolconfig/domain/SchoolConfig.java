@@ -41,6 +41,15 @@ public class SchoolConfig {
 
 	private String code;
 
+	/** Null on a document seeded before this field existed, which reads as {@link InstitutionType#SCHOOL}. */
+	private InstitutionType institutionType;
+
+	/** Null reads as {@link Terms#SCHOOL}; see {@link #resolvedTerms()}. */
+	private Terms terms;
+
+	/** Null reads as {@link Modules#ALL_ON}; see {@link #resolvedModules()}. */
+	private Modules modules;
+
 	private Identity identity;
 
 	private Landing landing;
@@ -52,4 +61,26 @@ public class SchoolConfig {
 	private Instant createdAt;
 
 	private Instant updatedAt;
+
+	/**
+	 * The institution type, defaulted.
+	 *
+	 * <p>These three accessors are deliberately <em>not</em> named {@code getX}: Lombok would then not
+	 * generate the plain getter, and the difference between "what is stored" and "what this means"
+	 * would stop being visible at the call site. Everything that renders or gates reads the
+	 * {@code resolved} form; only the audit trail and the admin response want the raw field.
+	 */
+	public InstitutionType resolvedInstitutionType() {
+		return institutionType == null ? InstitutionType.SCHOOL : institutionType;
+	}
+
+	/** The vocabulary, with any word the document is missing filled in from the school defaults. */
+	public Terms resolvedTerms() {
+		return terms == null ? Terms.SCHOOL : terms.withDefaults();
+	}
+
+	/** The module switches, where a document without them means every module is on. */
+	public Modules resolvedModules() {
+		return modules == null ? Modules.ALL_ON : modules;
+	}
 }

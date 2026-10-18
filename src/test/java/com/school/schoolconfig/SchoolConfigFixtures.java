@@ -9,6 +9,7 @@ import com.school.schoolconfig.api.SchoolConfigMapper;
 import com.school.schoolconfig.api.SchoolConfigMapperImpl;
 import com.school.schoolconfig.api.SchoolConfigRequest;
 import com.school.schoolconfig.domain.GradingMode;
+import com.school.schoolconfig.domain.InstitutionType;
 import com.school.schoolconfig.domain.SchoolConfig;
 
 /** Valid configuration for the tests, so each one only states what it is actually about. */
@@ -21,6 +22,9 @@ public final class SchoolConfigFixtures {
 
 	public static SchoolConfigRequest validRequest() {
 		return new SchoolConfigRequest(
+				InstitutionType.SCHOOL,
+				new SchoolConfigRequest.Terms("School", "Class", "Section", "Teacher"),
+				new SchoolConfigRequest.Modules(true, true, true, true, true, true, true, true),
 				new SchoolConfigRequest.Identity("Test Public School", "Learn and lead",
 						"https://media.test/public/logo/logo.png", "https://media.test/public/favicon/favicon.ico",
 						new SchoolConfigRequest.Theme("#0B3D91", "#F2A93B", "#12B886")),
@@ -54,13 +58,15 @@ public final class SchoolConfigFixtures {
 	}
 
 	/**
-	 * A configuration with every optional field left out: no tagline, logo, favicon, vision, principal,
-	 * academics, highlights, facilities, gallery, map or social links. Used to prove the public endpoint
-	 * still answers when a school has filled in only the essentials.
+	 * A configuration with every optional field left out: no institution type, vocabulary or module
+	 * switches, and no tagline, logo, favicon, vision, principal, academics, highlights, facilities,
+	 * gallery, map or social links. Used to prove the public endpoint still answers when a school has
+	 * filled in only the essentials, and that the three omitted blocks fall back to their defaults.
 	 */
 	public static SchoolConfigRequest minimalRequest() {
 		SchoolConfigRequest full = validRequest();
 		return new SchoolConfigRequest(
+				null, null, null,
 				new SchoolConfigRequest.Identity("Test Public School", null, null, null, full.identity().theme()),
 				new SchoolConfigRequest.Landing("A co-educational school teaching classes I to XII.",
 						null, null, null, null, null, null,
@@ -83,6 +89,11 @@ public final class SchoolConfigFixtures {
 				.id(SchoolConfig.SINGLETON_ID)
 				.version(0L)
 				.code(schoolCode)
+				// Defaulted the same way SchoolConfigService.seedIfMissing does it, so a fixture built from
+				// minimalRequest() is the document a first boot would actually store.
+				.institutionType(request.institutionType() == null ? InstitutionType.SCHOOL : request.institutionType())
+				.terms(MAPPER.toTerms(request.terms(), null))
+				.modules(MAPPER.toModules(request.modules(), null))
 				.identity(MAPPER.toIdentity(request.identity()))
 				.landing(MAPPER.toLanding(request.landing()))
 				.gradingScheme(MAPPER.toGradingScheme(request.gradingScheme()))

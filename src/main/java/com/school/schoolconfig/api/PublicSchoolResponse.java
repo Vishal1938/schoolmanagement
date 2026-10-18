@@ -3,6 +3,10 @@ package com.school.schoolconfig.api;
 import java.util.List;
 import java.util.Set;
 
+import com.school.schoolconfig.domain.InstitutionType;
+import com.school.schoolconfig.domain.Modules;
+import com.school.schoolconfig.domain.Terms;
+
 /**
  * What an anonymous visitor may see: identity and landing-page content, nothing else.
  *
@@ -16,12 +20,21 @@ import java.util.Set;
  *
  * <p>{@link Features} is the one member that is not configuration content; see its own note.
  *
- * <p>Only {@code name} is certain to be present. Everything else is optional in the configuration, so
- * a landing page must treat every field as possibly absent; the response omits nulls rather than
- * sending them.
+ * <p>Only {@code name}, {@code institutionType}, {@code terms}, {@code modules} and {@code features}
+ * are certain to be present. Everything else is optional in the configuration, so a landing page must
+ * treat every field as possibly absent; the response omits nulls rather than sending them.
+ *
+ * <p><strong>When the {@code landingPage} module is off</strong>, every field from {@code about}
+ * downwards — the whole marketing block, the published address included — is omitted, and the
+ * identity, the vocabulary and the module set remain. They have to: this is the only unauthenticated
+ * endpoint, so it is where a client learns what to render on the login screen and which navigation
+ * entries exist at all. That is also why this endpoint is never itself a 404.
  */
 public record PublicSchoolResponse(
 		String name,
+		InstitutionType institutionType,
+		Terms terms,
+		Modules modules,
 		String tagline,
 		String logoUrl,
 		String faviconUrl,
@@ -41,9 +54,9 @@ public record PublicSchoolResponse(
 
 	/** The complete set of top-level keys this response may ever serialise. */
 	public static final Set<String> FIELDS = Set.of(
-			"name", "tagline", "logoUrl", "faviconUrl", "theme", "about", "vision", "principal",
-			"academics", "highlights", "facilities", "galleryImageUrls", "stats", "contact",
-			"mapEmbedUrl", "socialLinks", "features");
+			"name", "institutionType", "terms", "modules", "tagline", "logoUrl", "faviconUrl", "theme",
+			"about", "vision", "principal", "academics", "highlights", "facilities", "galleryImageUrls",
+			"stats", "contact", "mapEmbedUrl", "socialLinks", "features");
 
 	/**
 	 * Which optional features this deployment has, so the frontend can decide what to render before

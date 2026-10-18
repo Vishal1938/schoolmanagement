@@ -4,7 +4,9 @@ import java.time.DayOfWeek;
 import java.util.List;
 import java.util.Set;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.school.schoolconfig.domain.GradingMode;
+import com.school.schoolconfig.domain.InstitutionType;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Max;
@@ -26,10 +28,41 @@ import jakarta.validation.constraints.Size;
  * through the API.
  */
 public record SchoolConfigRequest(
+		InstitutionType institutionType,
+		@Valid Terms terms,
+		@Valid Modules modules,
 		@Valid @NotNull Identity identity,
 		@Valid @NotNull Landing landing,
 		@Valid @NotNull GradingScheme gradingScheme,
 		@Valid @NotNull AcademicSettings academicSettings) {
+
+	/**
+	 * What this institution calls a class and a teacher. Optional as a whole and field by field: an
+	 * omitted word falls back to the school default, so a school never has to send this at all and a
+	 * college can send only the two words it changes.
+	 */
+	public record Terms(
+			@Size(max = 40) String institution,
+			@JsonProperty("class") @Size(max = 40) String schoolClass,
+			@Size(max = 40) String section,
+			@Size(max = 40) String teacher) {
+	}
+
+	/**
+	 * Which modules are on. Optional as a whole, and every field is a {@link Boolean} rather than a
+	 * {@code boolean} so that <strong>omitted means on</strong> — a client that sends five of the eight
+	 * must not silently switch the other three off, which is exactly what a primitive would do.
+	 */
+	public record Modules(
+			Boolean exams,
+			Boolean quizzes,
+			Boolean examPapers,
+			Boolean notices,
+			Boolean studentLogin,
+			Boolean onlinePayments,
+			Boolean landingPage,
+			Boolean ai) {
+	}
 
 	/** CSS hex colour, three or six digits. */
 	private static final String HEX_COLOUR = "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$";
