@@ -104,7 +104,9 @@ public interface SchoolConfigMapper {
 	 * into the {@code false} of the primitive field, which is the opposite of what omitting it means.
 	 */
 	default Modules toModules(SchoolConfigRequest.Modules requested, Modules current) {
-		Modules base = current == null ? Modules.ALL_ON : current;
+		// withDefaults, so a switch the stored subdocument predates is carried forward as on rather
+		// than unboxed out of a null below.
+		Modules base = current == null ? Modules.ALL_ON : current.withDefaults();
 		if (requested == null) {
 			return base;
 		}
@@ -124,7 +126,7 @@ public interface SchoolConfigMapper {
 		return requested == null || requested.isBlank() ? current : requested.trim();
 	}
 
-	private static boolean keep(Boolean requested, boolean current) {
+	private static Boolean keep(Boolean requested, Boolean current) {
 		return requested == null ? current : requested;
 	}
 }

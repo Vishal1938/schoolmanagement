@@ -79,8 +79,8 @@ public class SchoolConfig {
 		return terms == null ? Terms.SCHOOL : terms.withDefaults();
 	}
 
-	/** The module switches, where a document without them means every module is on. */
+	/** The module switches, where a document without them — or without one of them — means on. */
 	public Modules resolvedModules() {
-		return modules == null ? Modules.ALL_ON : modules;
+		return modules == null ? Modules.ALL_ON : modules.withDefaults();
 	}
 }
