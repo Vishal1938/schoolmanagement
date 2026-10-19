@@ -8,6 +8,7 @@ import com.school.payment.domain.Payment;
 import com.school.payment.domain.PaymentMode;
 import com.school.payment.domain.PaymentStatus;
 import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.data.mongodb.repository.Query;
 
 /** Repository for {@code payments}. Internal to this module; callers use the services in {@code app}. */
 public interface PaymentRepository extends MongoRepository<Payment, String> {
@@ -18,9 +19,20 @@ public interface PaymentRepository extends MongoRepository<Payment, String> {
 	/**
 	 * Captured payments in a half-open instant range, for the collection report. Only CAPTURED rows
 	 * are money: a created-but-unpaid gateway order would otherwise inflate every total.
+	 *
+	 * <p>Written out as a {@code @Query} rather than derived from the method name, and that is
+	 * load-bearing. A derived name mentioning one property in two range clauses — the
+	 * {@code ...PaidAtGreaterThanEqualAndPaidAtLessThan...} this replaces — becomes
+	 * {@code and("paidAt")} twice over, and a single {@code org.bson.Document} cannot hold the key
+	 * twice: {@code InvalidMongoDbApiUsageException}, thrown while building the query, so it failed
+	 * every call and not merely some data. {@code Between} would derive cleanly but is inclusive at
+	 * both ends, and {@code to} here is the next day's midnight, which would count a payment made
+	 * exactly then in two days at once.
+	 *
+	 * <p>Served by {@code payments_status_paid_at_idx}.
 	 */
-	List<Payment> findByStatusAndPaidAtGreaterThanEqualAndPaidAtLessThanOrderByPaidAtAsc(
-			PaymentStatus status, Instant from, Instant to);
+	@Query(value = "{ 'status': ?0, 'paidAt': { '$gte': ?1, '$lt': ?2 } }", sort = "{ 'paidAt': 1 }")
+	List<Payment> findCapturedInRange(PaymentStatus status, Instant from, Instant to);
 
 	/**
 	 * Our payment for a gateway order. The order id is all the verify call and the webhook carry, so

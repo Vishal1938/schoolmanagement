@@ -76,7 +76,7 @@ public class CollectionReportService {
 		// Half-open on the instant axis: the day after `end` at midnight, so the whole of `end` counts.
 		Instant fromInstant = start.atStartOfDay(clock.getZone()).toInstant();
 		Instant toInstant = end.plusDays(1).atStartOfDay(clock.getZone()).toInstant();
-		List<Payment> captured = payments.findByStatusAndPaidAtGreaterThanEqualAndPaidAtLessThanOrderByPaidAtAsc(
+		List<Payment> captured = payments.findCapturedInRange(
 				PaymentStatus.CAPTURED, fromInstant, toInstant);
 		// One lookup for the whole range rather than per payment. Empty when no kind was asked for, in
 		// which case nothing below consults it.
@@ -148,8 +148,7 @@ public class CollectionReportService {
 	public DayCollection dayTotal(LocalDate date) {
 		Instant from = date.atStartOfDay(clock.getZone()).toInstant();
 		Instant to = date.plusDays(1).atStartOfDay(clock.getZone()).toInstant();
-		List<Payment> captured = payments.findByStatusAndPaidAtGreaterThanEqualAndPaidAtLessThanOrderByPaidAtAsc(
-				PaymentStatus.CAPTURED, from, to);
+		List<Payment> captured = payments.findCapturedInRange(PaymentStatus.CAPTURED, from, to);
 		return new DayCollection(date, captured.stream().mapToLong(Payment::getAmount).sum(), captured.size());
 	}
 
