@@ -22,8 +22,9 @@ import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Component;
 
 /**
- * Seeds {@code school_config} on first boot from {@code app.seed.school-config-location}, so a new
- * deployment needs a JSON file and environment variables rather than a code change.
+ * Seeds {@code school_config} on first boot, so a new deployment needs a JSON file and environment
+ * variables rather than a code change. The file is {@code app.seed.school-config-location} when that
+ * is set, and otherwise the bundled seed for {@code SEED_PROFILE} ({@code school} or {@code college}).
  *
  * <p>The seed file has the same shape as the {@code PUT /school/config} body and is validated with
  * the same constraints, which is why this class in {@code app} uses the DTO from {@code api}: one
@@ -61,7 +62,7 @@ public class SchoolConfigSeeder implements ApplicationRunner {
 			log.debug("School configuration already present; skipping the seed");
 			return;
 		}
-		String location = properties.seed().schoolConfigLocation();
+		String location = properties.seed().resolvedLocation();
 		SchoolConfigRequest seed = read(location);
 		validate(seed, location);
 		if (service.seedIfMissing(seed)) {
@@ -76,7 +77,8 @@ public class SchoolConfigSeeder implements ApplicationRunner {
 		Resource resource = resourceLoader.getResource(location);
 		if (!resource.exists()) {
 			throw new IllegalStateException("No school configuration in the database and no seed file at " + location
-					+ ". Point app.seed.school-config-location at a readable file.");
+					+ ". Set SEED_PROFILE to school or college, or point app.seed.school-config-location at a"
+					+ " readable file.");
 		}
 		try (InputStream in = resource.getInputStream()) {
 			return objectMapper.readValue(in, SchoolConfigRequest.class);
