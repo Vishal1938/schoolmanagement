@@ -34,4 +34,10 @@ public interface PaymentRepository extends MongoRepository<Payment, String> {
 	 */
 	List<Payment> findTop100ByStatusAndModeAndCreatedAtLessThanOrderByCreatedAtAsc(
 			PaymentStatus status, PaymentMode mode, Instant cutoff);
+
+	/**
+	 * The last few receipts issued, newest first, for the admin dashboard. Served by the
+	 * {@code status, paidAt} index the collection report already needs.
+	 */
+	List<Payment> findTop10ByStatusOrderByPaidAtDesc(PaymentStatus status);
 }

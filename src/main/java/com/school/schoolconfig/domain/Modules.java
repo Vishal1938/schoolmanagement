@@ -18,6 +18,10 @@ package com.school.schoolconfig.domain;
  * @param examPapers     the exam paper vault, which is separate from {@code exams}: an institution
  *                       can run exams on paper and still not want an upload vault
  * @param notices        notices, including the public ones the landing page lists
+ * @param studentAttendance the daily class register. Off means an institution that keeps no student
+ *                       attendance at all — a college running on subject-wise registers it holds
+ *                       elsewhere. <strong>Employee attendance is not covered by it</strong> and stays
+ *                       on either way, because payroll prorates salaries from it
  * @param studentLogin   whether students get a login at all. Off means admission and import create no
  *                       user and issue no temporary password, and an existing student account is
  *                       refused at login — see {@code AuthService}
@@ -34,11 +38,12 @@ public record Modules(
 		boolean quizzes,
 		boolean examPapers,
 		boolean notices,
+		boolean studentAttendance,
 		boolean studentLogin,
 		boolean onlinePayments,
 		boolean landingPage,
 		boolean ai) {
 
 	/** The default, and what a missing {@code modules} subdocument means. */
-	public static final Modules ALL_ON = new Modules(true, true, true, true, true, true, true, true);
+	public static final Modules ALL_ON = new Modules(true, true, true, true, true, true, true, true, true);
 }

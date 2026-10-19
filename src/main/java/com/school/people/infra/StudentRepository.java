@@ -46,6 +46,9 @@ public interface StudentRepository extends MongoRepository<Student, String> {
 	 */
 	List<Student> findByEnrollmentSessionId(String sessionId);
 
+	/** How many are on the roll for a session, for the dashboard — a count rather than a load. */
+	long countByEnrollmentSessionIdAndStatus(String sessionId, StudentStatus status);
+
 	/**
 	 * Which of these admission numbers are already taken. One query for a whole spreadsheet, so the
 	 * import (B5) does not issue a round trip per row.

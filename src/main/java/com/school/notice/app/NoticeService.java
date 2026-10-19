@@ -95,6 +95,17 @@ public class NoticeService {
 	}
 
 	/**
+	 * How many notices are live on the caller's board right now, for the admin dashboard (B16).
+	 *
+	 * <p>The caller's own board rather than every notice ever written: a count of what an
+	 * administrator would see if they clicked through, which is the only count that matches the screen
+	 * behind it. Scheduled and expired notices are not on it and are not counted.
+	 */
+	public long activeCount() {
+		return feed(PageRequest.of(0, 1)).getTotalElements();
+	}
+
+	/**
 	 * The most recent public notices, reduced to what another module may read (B18).
 	 *
 	 * <p>No caller check: every one of these is already published to the internet by

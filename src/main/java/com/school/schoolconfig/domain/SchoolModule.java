@@ -20,6 +20,8 @@ public enum SchoolModule {
 
 	NOTICES,
 
+	STUDENT_ATTENDANCE,
+
 	STUDENT_LOGIN,
 
 	ONLINE_PAYMENTS,
@@ -36,6 +38,7 @@ public enum SchoolModule {
 			case QUIZZES -> effective.quizzes();
 			case EXAM_PAPERS -> effective.examPapers();
 			case NOTICES -> effective.notices();
+			case STUDENT_ATTENDANCE -> effective.studentAttendance();
 			case STUDENT_LOGIN -> effective.studentLogin();
 			case ONLINE_PAYMENTS -> effective.onlinePayments();
 			case LANDING_PAGE -> effective.landingPage();

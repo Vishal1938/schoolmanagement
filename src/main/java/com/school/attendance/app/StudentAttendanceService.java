@@ -212,6 +212,39 @@ public class StudentAttendanceService {
 		return shares;
 	}
 
+	// --- one day, school-wide ---------------------------------------------------------------------
+
+	/**
+	 * Every register of one day reduced to a single tally, for the admin dashboard (B16).
+	 *
+	 * <p>One read of the day's registers, not one per class. No caller check: it returns counts and a
+	 * percentage and nothing that names a student, and the endpoint that calls it is already behind
+	 * {@code DASHBOARD_ADMIN}.
+	 *
+	 * <p>A day nobody has marked comes back as zeros rather than as an error — on a holiday, and at
+	 * nine in the morning, that is the true answer.
+	 */
+	public DayAttendance day(LocalDate date) {
+		List<AttendanceStatus> statuses = new ArrayList<>();
+		List<StudentAttendance> registers = attendance.findByDate(date);
+		for (StudentAttendance register : registers) {
+			if (register.getEntries() == null) {
+				continue;
+			}
+			register.getEntries().forEach(entry -> statuses.add(entry.status()));
+		}
+		AttendanceSummary summary = AttendanceSummary.of(statuses);
+		return new DayAttendance(date, registers.size(), sectionCount(), summary.present(), summary.absent(),
+				summary.late(), summary.halfDay(), summary.leave(), summary.workingDays(), summary.percentage());
+	}
+
+	/** How many class-sections exist, which is how many registers a fully marked day would have. */
+	private int sectionCount() {
+		return classes.list().stream()
+				.mapToInt(schoolClass -> schoolClass.getSections() == null ? 0 : schoolClass.getSections().size())
+				.sum();
+	}
+
 	/** The days of this student's attendance that were actually marked in the range, in date order. */
 	private List<AttendanceHistoryResponse.Day> days(String studentUniqueId, LocalDate from, LocalDate to) {
 		return attendance.findByEntriesStudentUniqueIdAndDateBetweenOrderByDateAsc(studentUniqueId, from, to)

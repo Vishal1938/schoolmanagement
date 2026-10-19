@@ -11,6 +11,7 @@
     "quizzes": true,
     "examPapers": true,
     "notices": true,
+    "studentAttendance": true,
     "studentLogin": true,
     "onlinePayments": true,
     "landingPage": true,

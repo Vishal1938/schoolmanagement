@@ -36,6 +36,9 @@ import org.springframework.data.mongodb.core.mapping.Document;
 // The per-student history query, which is otherwise a collection scan.
 @CompoundIndex(name = "student_attendance_student_date_idx",
 		def = "{'entries.studentUniqueId': 1, 'date': 1}")
+// Every register of one day, across all classes: the admin dashboard's "today's attendance". The
+// class-section-date index above cannot serve it, because date is its last key.
+@CompoundIndex(name = "student_attendance_date_idx", def = "{'date': 1}")
 public class StudentAttendance {
 
 	public static final String COLLECTION = "student_attendance";

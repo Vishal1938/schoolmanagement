@@ -190,6 +190,24 @@ public class PaymentService {
 	}
 
 	/**
+	 * The last ten receipts issued, newest first, reduced to what a dashboard prints (B16).
+	 *
+	 * <p>CAPTURED only: a gateway order nobody completed is not a taking, and listing one would have
+	 * the dashboard announce money that never arrived.
+	 *
+	 * <p>No caller check — it returns amounts, so the endpoint that calls it is behind
+	 * {@code DASHBOARD_ADMIN}, and the projection cannot carry anything finer whatever calls it next.
+	 */
+	public List<PaymentSummary> recent() {
+		return payments.findTop10ByStatusOrderByPaidAtDesc(PaymentStatus.CAPTURED).stream()
+				.map(payment -> new PaymentSummary(payment.getId(), payment.getReceiptNo(),
+						payment.getStudentUniqueId(),
+						students.findRef(payment.getStudentUniqueId()).map(StudentRef::name).orElse(null),
+						payment.getAmount(), payment.getMode(), payment.getPaidAt()))
+				.toList();
+	}
+
+	/**
 	 * One payment, with the object-level check that gates the receipt: an admin, or the student the
 	 * payment is for. A teacher is refused — a receipt names amounts (CLAUDE.md rule 2).
 	 */
