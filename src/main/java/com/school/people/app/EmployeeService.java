@@ -28,6 +28,7 @@ import com.school.common.security.FieldEncryptor;
 import com.school.common.security.Permission;
 import com.school.common.security.Role;
 import com.school.common.security.TemporaryPasswordGenerator;
+import com.school.common.tx.ShortTransaction;
 import com.school.people.api.EmployeeAdminView;
 import com.school.people.api.EmployeeListItem;
 import com.school.people.api.EmployeeRequest;
@@ -74,11 +75,13 @@ public class EmployeeService {
 	private final IdGenerator idGenerator;
 	private final TemporaryPasswordGenerator temporaryPasswords;
 	private final AuditService audit;
+	private final ShortTransaction transaction;
 	private final Clock clock;
 
 	public EmployeeService(EmployeeRepository employees, MongoOperations mongo, SubjectService subjects,
 			UserService users, FieldEncryptor encryptor, IdGenerator idGenerator,
-			TemporaryPasswordGenerator temporaryPasswords, AuditService audit, Clock clock) {
+			TemporaryPasswordGenerator temporaryPasswords, AuditService audit, ShortTransaction transaction,
+			Clock clock) {
 		this.employees = employees;
 		this.mongo = mongo;
 		this.subjects = subjects;
@@ -87,6 +90,7 @@ public class EmployeeService {
 		this.idGenerator = idGenerator;
 		this.temporaryPasswords = temporaryPasswords;
 		this.audit = audit;
+		this.transaction = transaction;
 		this.clock = clock;
 	}
 
@@ -94,14 +98,42 @@ public class EmployeeService {
 
 	/**
 	 * Takes on an employee: issues the EMP id, writes the record, and — for a teacher, or for a staff
-	 * member with {@code hasLogin} — creates the login that shares that id, all in one transaction.
+	 * member with {@code hasLogin} — creates the login that shares that id. The two writes are one
+	 * transaction; the id and the password hash are drawn before it opens, so the transaction is only
+	 * as long as the inserts. See {@link PreparedLogin}.
 	 *
 	 * @return the employee, with the temporary password when a login was created and null when not
 	 */
-	@Transactional
 	public EmployeeSavedResponse hire(EmployeeRequest request) {
 		validateSubjects(request);
-		String uniqueId = idGenerator.next(IdType.EMP);
+		return hire(request, prepareLogin(request));
+	}
+
+	/**
+	 * Draws the id and, when this employee is to have one, the login credentials — outside any
+	 * transaction, because the hashing is the slow part.
+	 *
+	 * <p>For the import, which prepares every row before writing any of them. A staff row with
+	 * {@code Can Login = NO} is prepared without a password, so nothing is hashed for it at all.
+	 */
+	PreparedLogin prepareLogin(EmployeeRequest request) {
+		boolean withLogin = request.employeeType() == EmployeeType.TEACHER || request.hasLogin();
+		return PreparedLogin.draw(IdType.EMP, withLogin, idGenerator, temporaryPasswords, users);
+	}
+
+	/**
+	 * Hires under credentials that have already been prepared.
+	 *
+	 * <p>Callers that prepared the login themselves have already validated the subjects, which is why
+	 * this does not repeat the check: it is a read per teacher row, and the import does it once for
+	 * the whole file.
+	 */
+	EmployeeSavedResponse hire(EmployeeRequest request, PreparedLogin login) {
+		return transaction.execute(() -> write(request, login));
+	}
+
+	private EmployeeSavedResponse write(EmployeeRequest request, PreparedLogin login) {
+		String uniqueId = login.uniqueId();
 		Instant now = Instant.now(clock);
 		Employee employee = employees.insert(apply(Employee.builder()
 				.uniqueId(uniqueId)
@@ -110,7 +142,7 @@ public class EmployeeService {
 				.updatedAt(now), request, null)
 				.build());
 
-		String temporaryPassword = createLoginIfNeeded(employee, null);
+		String temporaryPassword = createPreparedLogin(employee, login);
 		audit.record(AuditAction.EMPLOYEE_CREATED, AUDIT_ENTITY, uniqueId, null, employee);
 		return new EmployeeSavedResponse(uniqueId, temporaryPassword, adminView(employee));
 	}
@@ -362,21 +394,48 @@ public class EmployeeService {
 	}
 
 	/**
-	 * Creates the login if this employee should have one and does not yet.
+	 * Creates the login on a hire, from credentials already prepared and hashed.
 	 *
-	 * @param before null on a hire; on an update, what the employee looked like before
+	 * <p>No {@code users.exists} check, unlike the update path: the {@code uniqueId} was drawn from the
+	 * counters a moment ago, so there is nothing for it to find, and inside a per-row transaction a
+	 * read we know the answer to is a round trip against the sixty-second budget. The unique index on
+	 * {@code users.uniqueId} remains the actual guarantee.
+	 *
+	 * @return the temporary password, or null when this employee gets no login
+	 */
+	private String createPreparedLogin(Employee employee, PreparedLogin login) {
+		if (!employee.isHasLogin() || !login.withLogin()) {
+			return null;
+		}
+		users.createWithUniqueId(employee.getUniqueId(),
+				newUser(employee, login.temporaryPassword()), login.passwordHash());
+		return login.temporaryPassword();
+	}
+
+	/**
+	 * Creates the login if this employee should have one and does not yet — the update path, where a
+	 * staff member's {@code hasLogin} has just been switched on.
+	 *
+	 * <p>Still hashes inside the transaction, and deliberately so: this is one password on one request,
+	 * not three hundred in a loop, and there is nowhere earlier to do it. The {@code hasLogin} being
+	 * asked for is only known once the request has been applied.
+	 *
+	 * @param before what the employee looked like before the update
 	 * @return the temporary password, or null when nothing was created
 	 */
 	private String createLoginIfNeeded(Employee employee, Employee before) {
-		boolean hadLogin = before != null && before.isHasLogin();
-		if (!employee.isHasLogin() || hadLogin || users.exists(employee.getUniqueId())) {
+		if (!employee.isHasLogin() || before.isHasLogin() || users.exists(employee.getUniqueId())) {
 			return null;
 		}
 		String temporaryPassword = temporaryPasswords.generate();
-		Role role = employee.getEmployeeType() == EmployeeType.TEACHER ? Role.TEACHER : Role.STAFF;
-		users.createWithUniqueId(employee.getUniqueId(), new NewUser(role, employee.getName(), employee.getEmail(),
-				temporaryPassword, true, employee.getId()));
+		users.createWithUniqueId(employee.getUniqueId(), newUser(employee, temporaryPassword));
 		return temporaryPassword;
+	}
+
+	private static NewUser newUser(Employee employee, String temporaryPassword) {
+		Role role = employee.getEmployeeType() == EmployeeType.TEACHER ? Role.TEACHER : Role.STAFF;
+		return new NewUser(role, employee.getName(), employee.getEmail(), temporaryPassword, true,
+				employee.getId());
 	}
 
 	private EmployeeAdminView adminView(Employee employee) {

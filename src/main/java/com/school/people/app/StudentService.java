@@ -34,6 +34,7 @@ import com.school.common.security.CurrentUser;
 import com.school.common.security.Permission;
 import com.school.common.security.Role;
 import com.school.common.security.TemporaryPasswordGenerator;
+import com.school.common.tx.ShortTransaction;
 import com.school.people.api.StudentAdminView;
 import com.school.people.api.StudentCreatedResponse;
 import com.school.people.api.StudentListItem;
@@ -88,12 +89,13 @@ public class StudentService {
 	private final TemporaryPasswordGenerator temporaryPasswords;
 	private final ModuleGate modules;
 	private final AuditService audit;
+	private final ShortTransaction transaction;
 	private final Clock clock;
 
 	public StudentService(StudentRepository students, MongoOperations mongo, SchoolClassService classes,
 			AcademicContext academicContext, UserService users, StudentFeeStatusProvider feeStatuses,
 			IdGenerator idGenerator, TemporaryPasswordGenerator temporaryPasswords, ModuleGate modules,
-			AuditService audit, Clock clock) {
+			AuditService audit, ShortTransaction transaction, Clock clock) {
 		this.students = students;
 		this.mongo = mongo;
 		this.classes = classes;
@@ -104,6 +106,7 @@ public class StudentService {
 		this.temporaryPasswords = temporaryPasswords;
 		this.modules = modules;
 		this.audit = audit;
+		this.transaction = transaction;
 		this.clock = clock;
 	}
 
@@ -116,21 +119,53 @@ public class StudentService {
 
 	/**
 	 * Admits a student: issues the STU id, writes the student, and creates the login that shares that
-	 * id, all in one transaction. Either both documents exist afterwards or neither does — a student
-	 * who cannot log in, or a login with no record behind it, is worse than a failed request.
+	 * id. The two writes are one transaction, so either both documents exist afterwards or neither
+	 * does — a student who cannot log in, or a login with no record behind it, is worse than a failed
+	 * request. It is also the reason MongoDB has to run as a replica set even locally.
 	 *
-	 * <p>The counter increment joins the same transaction, so a rollback hands the number back and the
-	 * next admission reuses it. That is harmless — nothing was written under it — and it is the reason
-	 * MongoDB has to run as a replica set even locally.
+	 * <p>The id and the password hash are drawn <em>before</em> that transaction opens, not inside it.
+	 * BCrypt at strength 12 takes a few hundred milliseconds, and keeping the transaction down to the
+	 * two inserts is what lets the import (B6) reuse this method three hundred times over without
+	 * running into Atlas's sixty-second transaction limit. See {@link PreparedLogin}.
 	 *
-	 * <p>With the {@code studentLogin} module off, no login is created and no password is issued; the
+	 * <p>With the {@code studentLogin} module off, no login is created and nothing is hashed; the
 	 * student record is written exactly as before and {@code temporaryPassword} comes back null.
 	 *
 	 * @return the student together with the temporary password, which is shown exactly once — null when
 	 *         this deployment does not give students a login
 	 */
-	@Transactional
 	public StudentCreatedResponse admit(StudentRequest request) {
+		return admit(request, prepareLogin());
+	}
+
+	/** Draws the id and, if this deployment gives students logins, the credentials that go with it. */
+	PreparedLogin prepareLogin() {
+		return prepareLogin(studentLoginsEnabled());
+	}
+
+	/**
+	 * The same, for a caller that has already decided.
+	 *
+	 * <p>The import asks the module gate once for the whole file and then passes the answer in for
+	 * every row: switching {@code studentLogin} mid-import is not a case worth modelling, and a file
+	 * half of whose rows have logins would be worse than either outcome.
+	 */
+	PreparedLogin prepareLogin(boolean withLogin) {
+		return PreparedLogin.draw(IdType.STU, withLogin, idGenerator, temporaryPasswords, users);
+	}
+
+	/**
+	 * Admits a student under credentials that have already been prepared.
+	 *
+	 * <p>Safe to run twice, which {@link ShortTransaction} requires of it: the admission number is
+	 * re-checked inside the transaction, so a retry of an attempt that did in fact commit comes back
+	 * as a conflict rather than as a second student.
+	 */
+	StudentCreatedResponse admit(StudentRequest request, PreparedLogin login) {
+		return transaction.execute(() -> write(request, login));
+	}
+
+	private StudentCreatedResponse write(StudentRequest request, PreparedLogin login) {
 		AcademicSession session = academicContext.currentSession();
 		SchoolClass schoolClass = validatedClass(request.enrollment());
 		String section = normalizeSection(request.enrollment().section());
@@ -141,7 +176,7 @@ public class StudentService {
 		}
 		requireFreeRollNumber(session.getId(), schoolClass, section, request.enrollment().rollNo(), null);
 
-		String uniqueId = idGenerator.next(IdType.STU);
+		String uniqueId = login.uniqueId();
 		Instant now = Instant.now(clock);
 		Student student = students.insert(Student.builder()
 				.uniqueId(uniqueId)
@@ -165,18 +200,17 @@ public class StudentService {
 		// With the studentLogin module off there is no account to create and so no password to issue:
 		// an institution that does not give students a portal should not be accumulating dormant
 		// logins, and a temporary password printed on an admission slip nobody can use is worse than
-		// none at all. The student record itself is unchanged either way.
-		String temporaryPassword = null;
-		if (modules.isEnabled(SchoolModule.STUDENT_LOGIN)) {
-			temporaryPassword = temporaryPasswords.generate();
+		// none at all. The student record itself is unchanged either way. The decision was taken when
+		// the credentials were prepared, so nothing was hashed in that case.
+		if (login.withLogin()) {
 			// No e-mail on the login: students log in with their uniqueId, and siblings routinely share
 			// the family address, which the sparse unique index on users.email would reject.
-			users.createWithUniqueId(uniqueId, new NewUser(Role.STUDENT, student.getName(), null, temporaryPassword,
-					true, student.getId()));
+			users.createWithUniqueId(uniqueId, new NewUser(Role.STUDENT, student.getName(), null,
+					login.temporaryPassword(), true, student.getId()), login.passwordHash());
 		}
 
 		audit.record(AuditAction.STUDENT_CREATED, AUDIT_ENTITY, uniqueId, null, student);
-		return new StudentCreatedResponse(uniqueId, temporaryPassword,
+		return new StudentCreatedResponse(uniqueId, login.temporaryPassword(),
 				StudentAdminView.of(student, schoolClass.getName(), feeStatuses.statusFor(uniqueId)));
 	}
 

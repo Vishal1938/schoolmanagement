@@ -1,5 +1,6 @@
 package com.school.people.infra;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -26,4 +27,12 @@ public interface EmployeeRepository extends MongoRepository<Employee, String> {
 
 	/** Everyone currently employed, for the daily employee attendance register (B8). */
 	List<Employee> findByStatusOrderByNameAsc(EmployeeStatus status);
+
+	/**
+	 * Everyone holding one of these phone numbers. An employee has no admission number to be
+	 * recognised by, so a re-uploaded import identifies its rows by phone and name together — and this
+	 * asks for the whole file's numbers in one query rather than one per row. Covered by
+	 * {@code employees_phone_idx}.
+	 */
+	List<Employee> findByPhoneIn(Collection<String> phones);
 }

@@ -1,6 +1,7 @@
 package com.school.people.app;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -24,12 +25,13 @@ import com.school.people.api.ImportResult;
 import com.school.people.api.StudentCreatedResponse;
 import com.school.people.api.StudentRequest;
 import com.school.people.domain.Gender;
+import com.school.people.domain.ImportJob;
+import com.school.people.domain.ImportKind;
 import com.school.people.domain.Student;
 import com.school.people.infra.StudentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import static com.school.people.app.ImportColumns.Students;
@@ -37,22 +39,34 @@ import static com.school.people.app.ImportColumns.Students;
 /**
  * Admitting a spreadsheet full of students at once.
  *
- * <p>Two rules shape this class, and they are the reason it is as long as it is.
+ * <p>Three rules shape this class, and they are the reason it is as long as it is.
  *
- * <p><strong>Nothing is written until everything checks out.</strong> The file is validated end to
+ * <p><strong>Nothing is written until the whole file checks out.</strong> The file is validated end to
  * end first — required fields, dates, classes, sections, roll numbers, admission numbers — and only
  * then is a single student created. An admin uploading three hundred rows should never be left
- * guessing which half of them landed, and a half-imported class is far more work to undo than to
- * re-upload. The creation itself then runs in one transaction, so even a surprise at that stage
- * leaves the collection as it was.
+ * guessing which half of them were rejected, and a file with a bad cell in it is by far the most
+ * common way this endpoint ends.
  *
  * <p><strong>Every error in the file comes back at once.</strong> Validation does not stop at the
  * first bad cell: {@link ImportRow} records problems and carries on, so one upload yields the whole
  * list. Fixing a spreadsheet one error per round trip is the thing that makes bulk import useless.
  *
- * <p>Each row is then admitted through {@link StudentService#admit}, not by writing documents here.
- * Imported students must come out indistinguishable from typed-in ones — same ID series, same
- * login, same audit entry, same checks — and the way to guarantee that is to use the same code.
+ * <p><strong>The writing is many short transactions, not one long one.</strong> It used to be one, and
+ * on Atlas that was a bug: a MongoDB transaction may not stay open past
+ * {@code transactionLifetimeLimitSeconds}, sixty seconds there and not raisable, and three hundred
+ * BCrypt-12 hashes alone take longer than that. The import died with {@code NoSuchTransaction} on
+ * exactly the file sizes it exists for. So the slow work — every ID, every password, every hash — now
+ * happens before any transaction opens, and each row is then written in a transaction of its own,
+ * retried by {@link com.school.common.tx.ShortTransaction} if MongoDB says the attempt was transient.
+ *
+ * <p>What that costs is all-or-nothing across the loop. A row that fails on the write leaves the rows
+ * before it committed, and the honest thing to do is say so: {@code created}, {@code failedAtRow} and
+ * the error. The admin's recovery is to upload the same file again — {@link ImportJobService} has
+ * marked where it stopped, so the second run skips what already landed and carries on.
+ *
+ * <p>Each row is admitted through {@link StudentService#admit}, not by writing documents here.
+ * Imported students must come out indistinguishable from typed-in ones — same ID series, same login,
+ * same audit entry, same checks — and the way to guarantee that is to use the same code.
  */
 @Service
 public class StudentImportService {
@@ -74,18 +88,20 @@ public class StudentImportService {
 	private final AcademicContext academicContext;
 	private final IdGenerator idGenerator;
 	private final ImportCredentialsService credentialsFiles;
+	private final ImportJobService jobs;
 	private final AuditService audit;
 	private final Clock clock;
 
 	public StudentImportService(StudentService students, StudentRepository repository, SchoolClassService classes,
 			AcademicContext academicContext, IdGenerator idGenerator, ImportCredentialsService credentialsFiles,
-			AuditService audit, Clock clock) {
+			ImportJobService jobs, AuditService audit, Clock clock) {
 		this.students = students;
 		this.repository = repository;
 		this.classes = classes;
 		this.academicContext = academicContext;
 		this.idGenerator = idGenerator;
 		this.credentialsFiles = credentialsFiles;
+		this.jobs = jobs;
 		this.audit = audit;
 		this.clock = clock;
 	}
@@ -93,11 +109,14 @@ public class StudentImportService {
 	/**
 	 * Validates a workbook and, if it is clean, admits every row in it.
 	 *
-	 * @return either the rejection with every bad cell in the file, or the count and the id of the
-	 *         credentials file holding the temporary passwords
+	 * <p>Not {@code @Transactional}, and that is the point: one transaction around this method is what
+	 * made it fail on Atlas. The transactions are inside, one per row.
+	 *
+	 * @return the rejection with every bad cell in the file; or the count and the id of the credentials
+	 *         file holding the temporary passwords; or, if a row failed to write, how far it got
 	 */
-	@Transactional
 	public ImportResult importStudents(MultipartFile file) {
+		long startedNanos = System.nanoTime();
 		byte[] bytes = ImportSheet.bytesOf(file);
 		// Read before anything else: it is the one thing that fails loudly rather than per-row, and
 		// it is what an import of a file prepared before the session changed must be checked against.
@@ -105,7 +124,7 @@ public class StudentImportService {
 		LocalDate today = LocalDate.now(clock);
 
 		List<ImportError> errors = new ArrayList<>();
-		List<Admission> admissions = new ArrayList<>();
+		List<Admission> parsed = new ArrayList<>();
 		try (ImportSheet sheet = ImportSheet.open(bytes)) {
 			List<ImportError> missing = sheet.missingColumns(Students.ALL);
 			if (!missing.isEmpty()) {
@@ -118,10 +137,17 @@ public class StudentImportService {
 			for (ImportRow row : sheet.rows(errors)) {
 				Admission admission = parse(row, byName, today);
 				if (admission != null) {
-					admissions.add(admission);
+					parsed.add(admission);
 				}
 			}
 		}
+
+		// Is this the same file as a run that stopped partway? If so, the rows it already wrote are to
+		// be skipped rather than reported as duplicates — which is what they would otherwise be.
+		String jobKey = ImportJobService.keyFor(ImportKind.STUDENTS, bytes);
+		ImportJob resuming = errors.isEmpty() ? jobs.resumable(jobKey).orElse(null) : null;
+		List<Admission> admissions = resuming == null ? parsed : remaining(parsed, resuming);
+		Run run = new Run(jobKey, resuming, parsed.size(), parsed.size() - admissions.size(), startedNanos);
 
 		// Cross-row and cross-collection checks, which only make sense once every row has been read.
 		// Skipped when a row already failed: the rows that did not parse are missing from the list, so
@@ -135,7 +161,7 @@ public class StudentImportService {
 			return ImportResult.rejected(errors);
 		}
 
-		return admitAll(admissions, sessionId, claimedRolls, today);
+		return admitAll(run, admissions, sessionId, claimedRolls, today);
 	}
 
 	// --- validation -------------------------------------------------------------------------------
@@ -215,17 +241,7 @@ public class StudentImportService {
 	 * <p>The collection is asked once for the whole file rather than once per row.
 	 */
 	private void checkAdmissionNumbers(List<Admission> admissions) {
-		List<String> given = admissions.stream()
-				.map(Admission::admissionNo)
-				.filter(Objects::nonNull)
-				.toList();
-		if (given.isEmpty()) {
-			return;
-		}
-		Set<String> onFile = repository.findByAdmissionNoIn(given).stream()
-				.map(Student::getAdmissionNo)
-				.collect(Collectors.toSet());
-
+		Set<String> onFile = admissionNumbersOnFile(admissions);
 		Set<String> seen = new HashSet<>();
 		for (Admission admission : admissions) {
 			String admissionNo = admission.admissionNo();
@@ -241,6 +257,20 @@ public class StudentImportService {
 						"admission number " + admissionNo + " appears more than once in this file");
 			}
 		}
+	}
+
+	/** Which of the file's admission numbers already belong to a student. One query, not one per row. */
+	private Set<String> admissionNumbersOnFile(List<Admission> admissions) {
+		List<String> given = admissions.stream()
+				.map(Admission::admissionNo)
+				.filter(Objects::nonNull)
+				.toList();
+		if (given.isEmpty()) {
+			return Set.of();
+		}
+		return repository.findByAdmissionNoIn(given).stream()
+				.map(Student::getAdmissionNo)
+				.collect(Collectors.toSet());
 	}
 
 	/**
@@ -271,46 +301,112 @@ public class StudentImportService {
 		return claimed;
 	}
 
+	// --- resuming ---------------------------------------------------------------------------------
+
+	/**
+	 * The rows of a re-uploaded file that still have to be written.
+	 *
+	 * <p>Two tests, because neither alone is enough. A row <em>before</em> the one that failed was
+	 * written by the earlier run, which the row number settles — and has to, since a row that left its
+	 * {@code Admission No} blank was given a generated one and cannot be recognised by it. And a row
+	 * whose admission number is already on a student is skipped wherever it sits in the file, which
+	 * covers a row that was written after the recorded failure point or in some other run entirely.
+	 *
+	 * <p>Only reached for a file whose bytes match a run that stopped partway, so a genuine duplicate
+	 * in a fresh upload is still reported as one by {@link #checkAdmissionNumbers}.
+	 */
+	private List<Admission> remaining(List<Admission> parsed, ImportJob job) {
+		int failedAtRow = job.getFailedAtRow() == null ? 0 : job.getFailedAtRow();
+		Set<String> onFile = admissionNumbersOnFile(parsed);
+		return parsed.stream()
+				.filter(admission -> admission.row().number() >= failedAtRow)
+				.filter(admission -> admission.admissionNo() == null || !onFile.contains(admission.admissionNo()))
+				.toList();
+	}
+
 	// --- writing ----------------------------------------------------------------------------------
 
 	/**
 	 * Admits every row, numbering the ones that came without a roll number, and stores the credentials
 	 * the admissions produced.
 	 *
-	 * <p>The credentials file is written last, after the students exist. It is stored through the
-	 * object store rather than the database, so it is not part of this transaction: if the commit
-	 * were to fail after it is written, the file is orphaned rather than wrong, and the retention
-	 * sweep removes it within the day.
+	 * <p>In two phases, which is the whole fix. <strong>Preparation</strong> does everything slow with
+	 * no transaction open at all: the roll numbers, the generated admission numbers, the STU ids, the
+	 * temporary passwords and their BCrypt hashes. <strong>Writing</strong> then runs one short
+	 * transaction per row, so no single transaction is anywhere near MongoDB's lifetime limit however
+	 * large the file.
+	 *
+	 * <p>The first row that cannot be written stops the import. Carrying on would produce a page of
+	 * identical failures — whatever broke row 180 is still broken at row 181 — and would make the
+	 * resume marker meaningless, since it records a single point to continue from.
+	 *
+	 * <p>The credentials file is written last, after the students exist, and it is written on the
+	 * failure path too: those passwords exist nowhere else, and the rows that landed are real students
+	 * who need to be able to log in.
 	 */
-	private ImportResult admitAll(List<Admission> admissions, String sessionId,
+	private ImportResult admitAll(Run run, List<Admission> admissions, String sessionId,
 			Map<String, Set<Integer>> claimedRolls, LocalDate today) {
-		Map<String, Integer> nextRollNo = new HashMap<>();
-		List<ImportCredentialsService.Credential> credentials = new ArrayList<>(admissions.size());
 		// Asked once rather than per row: switching a module mid-import is not a case worth modelling,
-		// and a file half of whose rows have logins would be worse than either outcome.
+		// and a file half of whose rows have logins would be worse than either outcome. With it off,
+		// nothing is hashed for any row — the expensive half is skipped, not computed and discarded.
 		boolean withLogins = students.studentLoginsEnabled();
 
-		int created = 0;
+		Map<String, Integer> nextRollNo = new HashMap<>();
+		List<Planned> planned = new ArrayList<>(admissions.size());
 		for (Admission admission : admissions) {
 			int rollNo = admission.rollNo() != null
 					? admission.rollNo()
 					: assignRollNo(admission, sessionId, claimedRolls, nextRollNo);
-			StudentCreatedResponse admitted = students.admit(requestFor(admission, rollNo));
-			created++;
-			if (withLogins) {
-				credentials.add(new ImportCredentialsService.Credential(admission.name(), admission.sectionName(),
-						admitted.uniqueId(), admitted.temporaryPassword()));
-			}
+			planned.add(new Planned(admission, requestFor(admission, rollNo), students.prepareLogin(withLogins)));
 		}
 
+		List<ImportCredentialsService.Credential> credentials = new ArrayList<>(planned.size());
+		int created = 0;
+		for (Planned row : planned) {
+			try {
+				StudentCreatedResponse admitted = students.admit(row.request(), row.login());
+				created++;
+				if (withLogins) {
+					credentials.add(new ImportCredentialsService.Credential(row.admission().name(),
+							row.admission().sectionName(), admitted.uniqueId(), admitted.temporaryPassword()));
+				}
+			}
+			catch (RuntimeException ex) {
+				return stopped(run, created, credentials, row.admission().row().number(), ex, today, withLogins);
+			}
+		}
+		return finished(run, created, credentials, today, withLogins);
+	}
+
+	/** Every row the file still had to contribute is on file. */
+	private ImportResult finished(Run run, int created, List<ImportCredentialsService.Credential> credentials,
+			LocalDate today, boolean withLogins) {
 		// No logins, no credentials file: there would be nothing in it but a column of blanks, and an
 		// admin downloading it would reasonably read that as the import having gone wrong.
-		String credentialsFileId = withLogins ? credentialsFiles.store(credentials) : null;
-		// The count and the file id only: the passwords themselves are never audited, and never logged.
+		String credentialsFileId = credentialsFiles.store(credentials);
+		jobs.completed(run.key(), ImportKind.STUDENTS, created, run.alreadyCreated());
+		// The counts and the file id only: the passwords themselves are never audited, and never logged.
 		audit.record(AuditAction.STUDENTS_IMPORTED, AUDIT_ENTITY, credentialsFileId, null,
-				Map.of("created", created, "importedOn", today.toString(), "logins", withLogins));
-		log.info("Imported {} student(s) from a spreadsheet (logins: {})", created, withLogins);
-		return ImportResult.created(created, credentialsFileId);
+				Map.of("created", created, "skipped", run.skipped(), "rows", run.rowCount(),
+						"importedOn", today.toString(), "logins", withLogins));
+		log.info("Imported {} of {} student row(s) in {} ms (skipped {}, logins: {})",
+				created, run.rowCount(), run.elapsedMillis(), run.skipped(), withLogins);
+		return ImportResult.created(created, run.skipped(), credentialsFileId);
+	}
+
+	/** A row would not write. Report how far we got and leave a mark to resume from. */
+	private ImportResult stopped(Run run, int created, List<ImportCredentialsService.Credential> credentials,
+			int failedAtRow, RuntimeException failure, LocalDate today, boolean withLogins) {
+		String error = describe(failure);
+		String credentialsFileId = credentialsFiles.store(credentials);
+		jobs.failed(run.key(), ImportKind.STUDENTS, created, run.alreadyCreated(), failedAtRow, error);
+		audit.record(AuditAction.STUDENTS_IMPORTED, AUDIT_ENTITY, credentialsFileId, null,
+				Map.of("created", created, "skipped", run.skipped(), "rows", run.rowCount(),
+						"failedAtRow", failedAtRow, "importedOn", today.toString(), "logins", withLogins));
+		// Full stack trace: this is an unexpected write failure and whoever is on call needs the cause.
+		log.error("Student import stopped at row {} after {} of {} row(s) in {} ms (skipped {})",
+				failedAtRow, created, run.rowCount(), run.elapsedMillis(), run.skipped(), failure);
+		return ImportResult.partial(created, run.skipped(), credentialsFileId, failedAtRow, error);
 	}
 
 	/**
@@ -355,6 +451,16 @@ public class StudentImportService {
 				admission.previousSchool());
 	}
 
+	/** One line an administrator can act on, out of an exception that may have paragraphs in it. */
+	private static String describe(RuntimeException failure) {
+		String message = failure.getMessage();
+		if (message == null || message.isBlank()) {
+			return failure.getClass().getSimpleName();
+		}
+		String firstLine = message.lines().findFirst().orElse(message).trim();
+		return firstLine.length() <= 300 ? firstLine : firstLine.substring(0, 300) + "…";
+	}
+
 	/**
 	 * One validated row, held until the whole file has been checked.
 	 *
@@ -375,6 +481,29 @@ public class StudentImportService {
 		/** How the section is written in messages and on the credentials sheet, e.g. {@code Class 1-A}. */
 		String sectionName() {
 			return schoolClass.getName() + "-" + section;
+		}
+	}
+
+	/** A row with everything slow about it already computed, ready for its own short transaction. */
+	private record Planned(Admission admission, StudentRequest request, PreparedLogin login) {
+	}
+
+	/**
+	 * Bookkeeping for one call: what file it is, what an earlier run of it had already done, and when
+	 * this one started.
+	 *
+	 * @param resuming the partial run of this same file, or null for a fresh upload
+	 * @param rowCount rows the file offered, before the resume skipped any
+	 */
+	private record Run(String key, ImportJob resuming, int rowCount, int skipped, long startedNanos) {
+
+		/** Rows earlier runs of this file wrote, so the job's total stays a total. */
+		int alreadyCreated() {
+			return resuming == null ? 0 : resuming.getCreated();
+		}
+
+		long elapsedMillis() {
+			return Duration.ofNanos(System.nanoTime() - startedNanos).toMillis();
 		}
 	}
 }

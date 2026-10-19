@@ -765,7 +765,7 @@ here and the per-cell detail does not fit `ProblemDetail`:
 the header text exactly as the template writes it.
 
 When every row is clean, each one is created through the same service the single-create endpoint
-uses — same ID series, same login, same per-record audit entry — inside one transaction:
+uses — same ID series, same login, same per-record audit entry:
 
 ```json
 { "valid": true, "created": 42, "credentialsFileId": "6f1c0b2e-9a44-4f0e-8d31-2b7c5ad0e913" }
@@ -774,6 +774,40 @@ uses — same ID series, same login, same per-record audit entry — inside one 
 A malformed upload — not an `.xlsx`, empty, or over 5 MB — is a normal 400 `VALIDATION_ERROR` in the
 usual error shape, since there are no rows to report against. 422 `UNPROCESSABLE` if no academic
 session is active.
+
+**Writing is not all-or-nothing, and there is a third outcome.** Each row is written in its own short
+transaction rather than all of them in one. A single transaction over a few hundred rows cannot be
+held open long enough — MongoDB caps a transaction's lifetime at 60 seconds on Atlas and will not
+raise it, and BCrypt hashing alone takes longer than that for a file of any size. Each row still
+lands whole or not at all, so there is never a student without their login or a login without its
+student, but the file as a whole can stop partway:
+
+```json
+{ "valid": true, "created": 180, "failedAtRow": 182,
+  "error": "Roll number 14 is already used in Class 5-B this session",
+  "credentialsFileId": "6f1c0b2e-9a44-4f0e-8d31-2b7c5ad0e913" }
+```
+
+Still `valid: true` and still 200 — the spreadsheet was fine, so there is nothing in it to correct.
+The `created` rows are on file and stay there, `failedAtRow` is the Excel row that would not write,
+and `credentialsFileId` covers the rows that did land, whose passwords exist nowhere else. The import
+stops at the first such row rather than carrying on: whatever broke row 182 will break row 183 too.
+
+**Recovery is to upload the same file again.** The server recorded where that file stopped, keyed on
+the file's own content hash, so the second run **skips the rows it already wrote** instead of
+rejecting them as duplicate admission numbers, and carries on from `failedAtRow`. A row is recognised
+as already written by its `Admission No` (students) or its `Phone` + `Name` together (employees), and
+by its position in the file. `skipped` counts them, and is absent when nothing was skipped:
+
+```json
+{ "valid": true, "created": 120, "skipped": 180,
+  "credentialsFileId": "b31f7a04-8e52-4c19-9a6d-70c4e1f88a2b" }
+```
+
+Edit the file between the two uploads and the hash changes, which makes it a new import — the
+duplicate checks then apply in full, as they should for a file nobody has seen before. Once a file has
+been carried to the end, a further upload of it is an ordinary import again and reports its
+duplicates.
 
 **Defaults the student import fills in.** `Roll No` blank → the next free number in that section,
 carrying on from the highest already there and skipping anything the file claimed explicitly.
@@ -798,8 +832,9 @@ staff who are all `Can Login = NO`, or a **student import while the `studentLogi
 a credentials file of blank passwords would read as the import having gone wrong.
 
 **Audit.** One `STUDENTS_IMPORTED` or `EMPLOYEES_IMPORTED` entry per import, holding the **counts
-only** and the credentials file id; each imported person also gets their own `STUDENT_CREATED` /
-`EMPLOYEE_CREATED` entry. No password reaches the trail.
+only** — `created`, `skipped`, `rows` and, when the run stopped, `failedAtRow` — and the credentials
+file id; each imported person also gets their own `STUDENT_CREATED` / `EMPLOYEE_CREATED` entry. No
+password reaches the trail.
 
 ### Member search
 | Method | Path | Who |

@@ -46,8 +46,9 @@ final class ImportSheet implements AutoCloseable {
 
 	/**
 	 * Rows past this are refused rather than imported. A school admits a few hundred students at a
-	 * time; a file with thousands of rows is a mistake, and validating it would hold a request and a
-	 * MongoDB transaction open for minutes.
+	 * time; a file with thousands of rows is a mistake, and validating and writing it would hold a
+	 * request open for minutes. The per-row transactions no longer care how long the file is, but the
+	 * admin waiting on the response still does.
 	 */
 	static final int MAX_ROWS = 1000;
 

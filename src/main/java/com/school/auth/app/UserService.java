@@ -20,9 +20,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  * This module's public way to create and look up logins. B5 and B6 call {@link #create} when they add a
  * student or an employee, which is why the account creation lives here rather than in {@code AuthService}.
  *
- * <p>Both the ID and the hash are produced here: a caller cannot choose a {@code uniqueId} and cannot
- * hand over a pre-hashed password, so every account in the collection has an ID from the counters
- * collection and a BCrypt-12 hash.
+ * <p>Both the ID and the hash are produced here: a caller cannot choose a {@code uniqueId}, and the
+ * only pre-hashed password it can hand over is one this service hashed for it, so every account in
+ * the collection has an ID from the counters collection and a BCrypt-12 hash.
  */
 @Service
 public class UserService {
@@ -50,7 +50,7 @@ public class UserService {
 	 * @return the stored user, whose {@code passwordHash} is the only trace of the password left
 	 */
 	public User create(NewUser request) {
-		return insert(idGenerator.next(idTypeFor(request.role())), request);
+		return insert(idGenerator.next(idTypeFor(request.role())), request, hash(request.rawPassword()));
 	}
 
 	/**
@@ -69,15 +69,38 @@ public class UserService {
 	 * into another module's signature. Callers already know the {@code uniqueId}: they issued it.
 	 */
 	public void createWithUniqueId(String uniqueId, NewUser request) {
-		insert(uniqueId, request);
+		insert(uniqueId, request, hash(request.rawPassword()));
 	}
 
-	private User insert(String uniqueId, NewUser request) {
+	/**
+	 * The same, with the hashing already done.
+	 *
+	 * <p>For the bulk imports (B6), which hash every row's password before opening a single
+	 * transaction: BCrypt-12 costs a few hundred milliseconds, and a few hundred of those inside one
+	 * transaction is how an import comes to exceed Atlas's sixty-second transaction limit. The
+	 * {@code rawPassword} on the request is ignored here; {@code hash} is what gets stored.
+	 */
+	public void createWithUniqueId(String uniqueId, NewUser request, HashedPassword hash) {
+		insert(uniqueId, request, hash);
+	}
+
+	/**
+	 * Hashes a password with the same encoder {@link #create} uses, so the work can be done before a
+	 * transaction is opened.
+	 *
+	 * <p>This is the only source of a {@link HashedPassword}, which is what keeps "every stored hash
+	 * is a BCrypt-12 hash this service made" true even though the hashing now happens outside.
+	 */
+	public HashedPassword hash(String rawPassword) {
+		return new HashedPassword(passwordEncoder.encode(rawPassword));
+	}
+
+	private User insert(String uniqueId, NewUser request, HashedPassword hash) {
 		User user = users.insert(User.builder()
 				.uniqueId(uniqueId)
 				.name(request.name())
 				.email(normalizeEmail(request.email()))
-				.passwordHash(passwordEncoder.encode(request.rawPassword()))
+				.passwordHash(hash.value())
 				.role(request.role())
 				.mustChangePassword(request.mustChangePassword())
 				.enabled(true)
