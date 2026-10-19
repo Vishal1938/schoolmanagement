@@ -30,9 +30,9 @@ public enum SchoolModule {
 
 	AI;
 
-	/** Whether this module is on in the given set. */
+	/** Whether this module is on in the given set, where anything it leaves unsaid is on. */
 	public boolean isOn(Modules modules) {
-		Modules effective = modules == null ? Modules.ALL_ON : modules;
+		Modules effective = modules == null ? Modules.ALL_ON : modules.withDefaults();
 		return switch (this) {
 			case EXAMS -> effective.exams();
 			case QUIZZES -> effective.quizzes();
