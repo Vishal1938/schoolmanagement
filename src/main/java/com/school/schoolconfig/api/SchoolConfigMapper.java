@@ -113,6 +113,7 @@ public interface SchoolConfigMapper {
 				keep(requested.quizzes(), base.quizzes()),
 				keep(requested.examPapers(), base.examPapers()),
 				keep(requested.notices(), base.notices()),
+				keep(requested.studentAttendance(), base.studentAttendance()),
 				keep(requested.studentLogin(), base.studentLogin()),
 				keep(requested.onlinePayments(), base.onlinePayments()),
 				keep(requested.landingPage(), base.landingPage()),

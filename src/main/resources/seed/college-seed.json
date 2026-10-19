@@ -11,6 +11,7 @@
     "quizzes": false,
     "examPapers": false,
     "notices": false,
+    "studentAttendance": false,
     "studentLogin": false,
     "onlinePayments": false,
     "landingPage": false,

@@ -305,6 +305,23 @@ public class PayrollService {
 				new PayrollMonthResponse.Totals(gross, net, paid, net - paid));
 	}
 
+	/**
+	 * What the current month's payroll still owes, for the admin dashboard (B16).
+	 *
+	 * <p>The current month rather than a month the caller picks: the dashboard asks "what do I owe
+	 * right now", and the register screen is where another month is looked up.
+	 *
+	 * <p>No caller check — it returns two figures and no employee — so the endpoint that calls it is
+	 * behind {@code DASHBOARD_ADMIN}.
+	 */
+	public PendingSalaries pendingThisMonth() {
+		String month = Months.format(YearMonth.now(clock));
+		List<PayrollRecord> pending = records.findByMonthOrderByEmployeeNameAsc(month).stream()
+				.filter(PayrollRecord::isPending)
+				.toList();
+		return new PendingSalaries(month, pending.size(), pending.stream().mapToLong(PayrollRecord::getNet).sum());
+	}
+
 	/** The caller's own salary records, newest month first, with what they have and have not been paid. */
 	public MyPayrollResponse mine() {
 		AuthPrincipal caller = CurrentUser.require();

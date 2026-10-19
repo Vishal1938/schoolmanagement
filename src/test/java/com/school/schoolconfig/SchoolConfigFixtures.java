@@ -24,7 +24,7 @@ public final class SchoolConfigFixtures {
 		return new SchoolConfigRequest(
 				InstitutionType.SCHOOL,
 				new SchoolConfigRequest.Terms("School", "Class", "Section", "Teacher"),
-				new SchoolConfigRequest.Modules(true, true, true, true, true, true, true, true),
+				new SchoolConfigRequest.Modules(true, true, true, true, true, true, true, true, true),
 				new SchoolConfigRequest.Identity("Test Public School", "Learn and lead",
 						"https://media.test/public/logo/logo.png", "https://media.test/public/favicon/favicon.ico",
 						new SchoolConfigRequest.Theme("#0B3D91", "#F2A93B", "#12B886")),

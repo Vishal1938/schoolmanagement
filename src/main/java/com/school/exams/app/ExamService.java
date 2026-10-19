@@ -2,6 +2,7 @@ package com.school.exams.app;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -105,6 +106,51 @@ public class ExamService {
 		return staffView ? found : found.stream()
 				.filter(exam -> exam.getStatus() == ExamStatus.PUBLISHED)
 				.toList();
+	}
+
+	/**
+	 * The active session's exams reduced to counts and the next paper's date, for the admin dashboard
+	 * (B16).
+	 *
+	 * <p>Reads the repository directly rather than going through {@link #list}, which narrows what a
+	 * student may see — this is behind {@code DASHBOARD_ADMIN}, and a count filtered by the caller's
+	 * own class would be the wrong number for an administrator.
+	 *
+	 * <p>Empty rather than an error when no session is active, so a dashboard still renders on a
+	 * deployment's first morning.
+	 */
+	public ExamsOverview overview() {
+		if (!academicContext.hasCurrentSession()) {
+			return new ExamsOverview(0, 0, 0, 0, null);
+		}
+		List<Exam> found = exams.findBySessionIdOrderByNameAsc(academicContext.currentSessionId());
+		LocalDate today = LocalDate.now(clock);
+		LocalDate next = null;
+		int draft = 0;
+		int marksEntry = 0;
+		int published = 0;
+		for (Exam exam : found) {
+			// Null-safe rather than a switch: a hand-written document with no status would otherwise
+			// take the whole dashboard down, and a count is not worth that.
+			if (exam.getStatus() == ExamStatus.DRAFT) {
+				draft++;
+			}
+			else if (exam.getStatus() == ExamStatus.MARKS_ENTRY) {
+				marksEntry++;
+			}
+			else if (exam.getStatus() == ExamStatus.PUBLISHED) {
+				published++;
+			}
+			for (ExamSubject paper : exam.getSchedule() == null ? List.<ExamSubject>of() : exam.getSchedule()) {
+				if (paper.date() == null || paper.date().isBefore(today)) {
+					continue;
+				}
+				if (next == null || paper.date().isBefore(next)) {
+					next = paper.date();
+				}
+			}
+		}
+		return new ExamsOverview(found.size(), draft, marksEntry, published, next);
 	}
 
 	public Exam get(String id) {

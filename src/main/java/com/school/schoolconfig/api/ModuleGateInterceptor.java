@@ -46,6 +46,10 @@ public class ModuleGateInterceptor implements HandlerInterceptor {
 			new Gated("/quizzes/**", SchoolModule.QUIZZES),
 			new Gated("/notices/**", SchoolModule.NOTICES),
 			new Gated("/public/notices/**", SchoolModule.NOTICES),
+			// The daily class register and one student's history. /attendance/employees** is deliberately
+			// not here: payroll prorates salaries from it, so it is not the institution's to switch off.
+			new Gated("/attendance/class/**", SchoolModule.STUDENT_ATTENDANCE),
+			new Gated("/attendance/students/**", SchoolModule.STUDENT_ATTENDANCE),
 			// The gateway checkout and its webhook only. The counter flow — /fees/offline-payment,
 			// /fees/register/mark-paid — is not here on purpose: an institution that takes no card
 			// payments still takes money at the desk. Nor is /payments/{id}/receipt.pdf: a receipt for

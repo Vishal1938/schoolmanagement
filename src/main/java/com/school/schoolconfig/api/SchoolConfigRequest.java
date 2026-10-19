@@ -50,14 +50,15 @@ public record SchoolConfigRequest(
 
 	/**
 	 * Which modules are on. Optional as a whole, and every field is a {@link Boolean} rather than a
-	 * {@code boolean} so that <strong>omitted means on</strong> — a client that sends five of the eight
-	 * must not silently switch the other three off, which is exactly what a primitive would do.
+	 * {@code boolean} so that <strong>omitted means on</strong> — a client that sends five of the nine
+	 * must not silently switch the other four off, which is exactly what a primitive would do.
 	 */
 	public record Modules(
 			Boolean exams,
 			Boolean quizzes,
 			Boolean examPapers,
 			Boolean notices,
+			Boolean studentAttendance,
 			Boolean studentLogin,
 			Boolean onlinePayments,
 			Boolean landingPage,

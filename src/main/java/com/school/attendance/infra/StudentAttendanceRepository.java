@@ -28,4 +28,10 @@ public interface StudentAttendanceRepository extends MongoRepository<StudentAtte
 	 * one query per child.
 	 */
 	List<StudentAttendance> findByClassIdAndDateBetween(String classId, LocalDate from, LocalDate to);
+
+	/**
+	 * Every register submitted on one day, across every class. One read behind the admin dashboard's
+	 * "today's attendance", served by {@code student_attendance_date_idx}.
+	 */
+	List<StudentAttendance> findByDate(LocalDate date);
 }

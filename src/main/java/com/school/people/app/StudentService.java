@@ -413,6 +413,25 @@ public class StudentService {
 				.toList();
 	}
 
+	/**
+	 * Every ACTIVE student enrolled in one session, whatever their class.
+	 *
+	 * <p>The whole roll in one read, for a caller that has to group the institution by class-section —
+	 * the admin dashboard's per-class fee standing (B16), which would otherwise be a query per class.
+	 * Unordered on purpose: whoever asked is bucketing it anyway.
+	 */
+	public List<StudentRef> activeInSession(String sessionId) {
+		return students.findByEnrollmentSessionId(sessionId).stream()
+				.filter(student -> student.getStatus() == StudentStatus.ACTIVE)
+				.map(StudentService::toRef)
+				.toList();
+	}
+
+	/** How many ACTIVE students are on the roll for a session. A count, not a load. */
+	public long activeCount(String sessionId) {
+		return students.countByEnrollmentSessionIdAndStatus(sessionId, StudentStatus.ACTIVE);
+	}
+
 	/** Names one student for another module, without handing over the document. */
 	public StudentRef requireRef(String uniqueId) {
 		return toRef(require(uniqueId));

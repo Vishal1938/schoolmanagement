@@ -268,7 +268,8 @@ The `Who` column gives access. "Self" means the user's own records only.
   "terms": { "institution": "School", "class": "Class", "section": "Section", "teacher": "Teacher" },
   "modules": {
     "exams": true, "quizzes": true, "examPapers": true, "notices": true,
-    "studentLogin": true, "onlinePayments": true, "landingPage": true, "ai": true
+    "studentAttendance": true, "studentLogin": true, "onlinePayments": true,
+    "landingPage": true, "ai": true
   },
   "tagline": "Learn with curiosity, lead with character",
   "logoUrl": "https://media.example/public/logo/....png",
@@ -2063,9 +2064,102 @@ or discarded is written to `audit_logs`: `SALARY_STRUCTURE_VERSIONED`, `SALARY_A
 ### Dashboards
 | Method | Path | Who |
 |---|---|---|
-| GET | `/dashboard/admin` | ADMIN. Counts, today's attendance %, fee collected this month vs due, pending salaries, recent payments |
+| GET | `/dashboard/admin` | `DASHBOARD_ADMIN` (ADMIN). The institution at a glance |
 | GET | `/dashboard/teacher` | TEACHER |
 | GET | `/dashboard/student` | STUDENT |
+
+#### `GET /dashboard/admin`
+
+One request for the whole landing screen. **Every amount is paise** (§1). Nothing here is cached:
+record a payment, come back, and `todayCollection` has moved.
+
+```json
+{
+  "asOf": "2026-10-19",
+  "session": { "id": "665f...", "name": "2026-27" },
+  "counts": { "students": 412, "teachers": 23, "staff": 9, "classes": 12, "sections": 27 },
+  "studentAttendance": {
+    "date": "2026-10-19",
+    "sectionsMarked": 24, "sectionsTotal": 27,
+    "present": 361, "absent": 18, "late": 4, "halfDay": 2, "leave": 3,
+    "markedStudents": 385, "percentage": 95.06
+  },
+  "todayCollection": { "date": "2026-10-19", "amount": 2450000, "count": 7 },
+  "feesSession":   { "totalDue": 184500000, "collected": 121300000, "pending": 63200000 },
+  "feesThisMonth": { "month": "2026-10", "totalDue": 18450000, "collected": 12130000, "pending": 6320000 },
+  "feesThisMonthByClass": [
+    {
+      "classId": "665f...", "className": "Class 1", "section": "A",
+      "students": 34, "paidCount": 28, "unpaidCount": 5,
+      "collected": 1120000, "pending": 200000
+    }
+  ],
+  "pendingOneTimeFees": [
+    {
+      "label": "Admission fee", "classId": "665f...", "className": "Class 1",
+      "unpaidCount": 6, "pending": 900000
+    }
+  ],
+  "pendingSalaries": { "month": "2026-10", "count": 4, "amount": 14800000 },
+  "recentPayments": [
+    {
+      "id": "665f...", "receiptNo": "DVM-RCP-26-000412",
+      "studentUniqueId": "DEMO-STU-26-00142", "studentName": "Aarav Sharma",
+      "amount": 450000, "mode": "UPI", "paidAt": "2026-10-19T04:21:08Z"
+    }
+  ],
+  "exams": { "total": 3, "draft": 1, "marksEntry": 1, "published": 1, "nextPaperDate": "2026-11-03" },
+  "notices": { "active": 4 },
+  "quizzes": { "draft": 2, "published": 5, "closed": 11 }
+}
+```
+
+**Sections for a module that is off are absent from the body, not null and not empty** — the API is
+`non_null` throughout (§1), so a client should test for the key rather than for an empty object:
+
+| Section | Gone when this module is off |
+|---|---|
+| `studentAttendance` | `studentAttendance` |
+| `exams` | `exams` |
+| `notices` | `notices` |
+| `quizzes` | `quizzes` |
+
+A module that is **on but has nothing in it yet** comes back as a section full of zeros, which is why
+absence and emptiness mean different things. `feesSession`, `feesThisMonth`, `todayCollection`,
+`pendingSalaries`, `recentPayments` and `counts` are always present: every deployment takes money and
+pays people.
+
+On a deployment with **no active academic session**, `session` is absent, `counts.students` is `0`
+and every fee section is zeroed or empty. The endpoint still answers 200 — an administrator has to be
+able to reach the screen that creates a session.
+
+Notes on the figures:
+
+- **`feesThisMonthByClass`** is the current month's `MONTHLY` installments only, one row per
+  class-section, **sorted by class order then section**. Rows come from the roll, so a section nobody
+  has billed yet still appears with its student count and zeros — which is how you spot that October
+  was never generated. `paidCount + unpaidCount` **can be less than `students`**: a student not
+  billed this month is in neither count, because they have neither paid nor failed to.
+- **`feesSession`** covers the whole active session and every kind of charge — monthly, one-time and
+  custom — so it is not the sum of the twelve monthly figures.
+- **`pendingOneTimeFees`** is one row per one-off charge per class, **heaviest first**, counted off
+  the invoices rather than against the roll: a student who has left still owes what they owed.
+  `CUSTOM` charges (one student's lost library book) are not here — the defaulters list carries those.
+- **Late fines are in none of these figures.** A fine is a function of today's date rather than a
+  stored amount, so including it would make `pending` a number that moves overnight on its own.
+  `GET /fees/reports/defaulters` is where a live fine is quoted. Cancelled invoices are excluded
+  throughout.
+- **`todayCollection.amount`** is what was *received* — every mode, late fines included, and any part
+  of a payment no invoice needed. It is the same figure as `total` from
+  `GET /fees/reports/collection?from=today&to=today`.
+- **`studentAttendance.percentage`** is `(present + late + 0.5 × halfDay) / markedStudents × 100`.
+  **Read `sectionsMarked` next to it**: at nine in the morning a 100% over 2 of 27 registers is two
+  teachers being prompt, not the institution's attendance.
+- **`pendingSalaries`** is the current month. `count: 0, amount: 0` is ambiguous on purpose — it
+  means either paid in full or never run — and `GET /payroll/runs/{month}` is where you tell which.
+- **`recentPayments`** is the last ten `CAPTURED` payments, newest first. A gateway order nobody
+  completed never appears. `studentName` is absent if the student record has since been removed; the
+  id always stands.
 
 ### Audit trail
 | Method | Path | Who |
@@ -2313,7 +2407,7 @@ are switched on lives in `school_config.modules`, and what the institution *call
 `school_config.terms`. Both are published on `GET /public/school` (§5) and edited through
 `PUT /school/config`.
 
-**All eight modules default to `true`.** A deployment configured before any of this existed has no
+**All nine modules default to `true`.** A deployment configured before any of this existed has no
 `modules` subdocument at all, which reads as everything on — so nothing about a school already
 running changes, and switching something off is always a deliberate act by an administrator.
 
@@ -2325,6 +2419,7 @@ running changes, and switching something off is always a deliberate act by an ad
 | `quizzes` | `/quizzes/**`, including attempts |
 | `examPapers` | `/exam-papers/**`. Separate from `exams` on purpose: an institution can run exams on paper and still not want an upload vault |
 | `notices` | `/notices/**` and `/public/notices/**` |
+| `studentAttendance` | `/attendance/class/**` (the daily register) and `/attendance/students/**` (one student's history). **Employee attendance is not covered** — `/attendance/employees**` keeps working, because payroll prorates salaries from it |
 | `onlinePayments` | `/payments/orders`, `/payments/verify`, `/public/payments/webhook` |
 | `ai` | `/ai/**` and `/public/ai/**`, in addition to the `APP_FEATURES_AI` environment switch |
 | `studentLogin` | No path. It changes behaviour instead — see below |
@@ -2340,6 +2435,22 @@ Deliberately **not** gated, whatever is switched off:
   the gateway, not about fees.
 - `GET /payments/{id}/receipt.pdf` — a receipt for money already taken keeps downloading forever,
   whatever has been turned off since.
+- `GET /dashboard/admin` and the other dashboards. A dashboard **omits the sections** belonging to
+  modules that are off rather than 404-ing, because an institution with exams switched off still
+  wants its fee figures — see §Dashboards.
+- `/holidays**` and `/attendance/employees**` — the holiday calendar and the employee register are
+  not part of `studentAttendance`.
+
+### `studentAttendance`
+
+Off means the institution keeps no daily student register — a college running subject-wise
+registers somewhere else. The two student paths above answer 404 `FEATURE_DISABLED` and the
+`studentAttendance` section disappears from `GET /dashboard/admin`.
+
+Employee attendance is untouched: payroll prorates salaries from it, so it is not the institution's
+to switch off. Report cards are not gated either — the attendance line on one is computed from
+whatever registers exist, so it reads `0 of 0 days` for an institution that has never marked any,
+and a deployment that switches the module off mid-year keeps printing the months it did mark.
 
 ### `studentLogin`
 

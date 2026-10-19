@@ -125,6 +125,23 @@ public class QuizService {
 	}
 
 	/**
+	 * How many quizzes are in each state, for the admin dashboard (B16).
+	 *
+	 * <p>Counted across every author, unlike {@link #list}, which narrows a teacher to their own: this
+	 * is behind {@code DASHBOARD_ADMIN} and the institution's total is the figure asked for. Counted in
+	 * the database rather than by loading the quizzes, because a quiz document carries its whole
+	 * question set and none of it is wanted here.
+	 */
+	public QuizzesOverview overview() {
+		return new QuizzesOverview(countOf(QuizStatus.DRAFT), countOf(QuizStatus.PUBLISHED),
+				countOf(QuizStatus.CLOSED));
+	}
+
+	private long countOf(QuizStatus status) {
+		return mongo.count(new Query(Criteria.where("status").is(status)), Quiz.class);
+	}
+
+	/**
 	 * How many attempts each of these quizzes has, in one aggregation rather than a count per row.
 	 * Quizzes nobody has sat are simply absent from the result.
 	 */

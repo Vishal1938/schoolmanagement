@@ -133,6 +133,26 @@ public class CollectionReportService {
 				modeTotals(byMode), headTotals(byHead), dayTotals(daily));
 	}
 
+	/**
+	 * What came in on one day, and how many payments it took — the dashboard's "today's collection"
+	 * (B16).
+	 *
+	 * <p>Not {@link #collection} narrowed to a single day, though it would give the same two numbers:
+	 * that one also builds the by-mode, by-head and daily breakdowns, none of which a two-figure tile
+	 * shows. The date is resolved in the school's own zone, so "today" ends at midnight locally rather
+	 * than five and a half hours early.
+	 *
+	 * <p>{@code amount} is what was received, including any late fine and any part of a payment no
+	 * invoice needed: a report of takings says what was taken.
+	 */
+	public DayCollection dayTotal(LocalDate date) {
+		Instant from = date.atStartOfDay(clock.getZone()).toInstant();
+		Instant to = date.plusDays(1).atStartOfDay(clock.getZone()).toInstant();
+		List<Payment> captured = payments.findByStatusAndPaidAtGreaterThanEqualAndPaidAtLessThanOrderByPaidAtAsc(
+				PaymentStatus.CAPTURED, from, to);
+		return new DayCollection(date, captured.stream().mapToLong(Payment::getAmount).sum(), captured.size());
+	}
+
 	/** Every invoice any of these payments touched, for one kind lookup across the range. */
 	private static Set<String> invoiceIdsOf(List<Payment> captured) {
 		return captured.stream()
