@@ -1,0 +1,79 @@
+{
+  "institutionType": "COLLEGE",
+  "terms": {
+    "institution": "College",
+    "class": "Course",
+    "section": "Year",
+    "teacher": "Faculty"
+  },
+  "modules": {
+    "exams": false,
+    "quizzes": false,
+    "examPapers": false,
+    "notices": false,
+    "studentLogin": false,
+    "onlinePayments": false,
+    "landingPage": false,
+    "ai": false
+  },
+  "identity": {
+    "name": "Your College Name",
+    "tagline": null,
+    "logoUrl": null,
+    "faviconUrl": null,
+    "theme": {
+      "primary": "#0B3D91",
+      "secondary": "#F2A93B",
+      "accent": "#12B886"
+    }
+  },
+  "landing": {
+    "about": "Replace this with a description of the college.",
+    "vision": null,
+    "principal": null,
+    "academics": null,
+    "highlights": [],
+    "facilities": [],
+    "galleryImageUrls": [],
+    "stats": {
+      "students": 0,
+      "teachers": 0,
+      "years": 0,
+      "passPercentage": 0
+    },
+    "contact": {
+      "addressLine1": "Replace with the college address",
+      "addressLine2": null,
+      "city": "Replace with the city",
+      "state": null,
+      "postalCode": null,
+      "phone": "+00 0000000000",
+      "alternatePhone": null,
+      "email": "office@college.example",
+      "websiteUrl": null
+    },
+    "mapEmbedUrl": null,
+    "socialLinks": null
+  },
+  "gradingScheme": {
+    "mode": "BOTH",
+    "bands": [
+      { "grade": "A1", "minPercentage": 91, "maxPercentage": 100, "remark": "Outstanding" },
+      { "grade": "A2", "minPercentage": 81, "maxPercentage": 90, "remark": "Excellent" },
+      { "grade": "B1", "minPercentage": 71, "maxPercentage": 80, "remark": "Very good" },
+      { "grade": "B2", "minPercentage": 61, "maxPercentage": 70, "remark": "Good" },
+      { "grade": "C1", "minPercentage": 51, "maxPercentage": 60, "remark": "Above average" },
+      { "grade": "C2", "minPercentage": 41, "maxPercentage": 50, "remark": "Average" },
+      { "grade": "D", "minPercentage": 33, "maxPercentage": 40, "remark": "Pass" },
+      { "grade": "E", "minPercentage": 0, "maxPercentage": 32, "remark": "Needs improvement" }
+    ]
+  },
+  "academicSettings": {
+    "workingDays": ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"],
+    "attendanceEditWindowHours": 48,
+    "receiptPrefix": "RCP",
+    "receiptFooter": null,
+    "salarySlipFooter": null,
+    "reportCardFooter": null
+  }
+}

@@ -55,7 +55,7 @@ Each feature package contains `api` (controllers and request/response DTOs), `ap
 10. **Index what you query**, and declare the indexes in code (`@CompoundIndex`/`@Indexed`, or an index initializer).
 
 ## Configuration (env vars)
-`SCHOOL_CODE`, `MONGODB_URI`, `JWT_SECRET`, `JWT_ACCESS_TTL=15m`, `JWT_REFRESH_TTL=7d`, `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD`, `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `APP_FEATURES_AI=false`, `AI_API_KEY`, `SMTP_*` (optional)
+`SCHOOL_CODE`, `MONGODB_URI`, `JWT_SECRET`, `JWT_ACCESS_TTL=15m`, `JWT_REFRESH_TTL=7d`, `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_PASSWORD`, `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `SEED_PROFILE=school` (or `college`), `APP_FEATURES_AI=false`, `AI_API_KEY`, `SMTP_*` (optional)
 
 ## Definition of done (every task)
 - Do NOT write test classes unless I explicitly ask. I test manually.

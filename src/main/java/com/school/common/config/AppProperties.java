@@ -1,8 +1,10 @@
 package com.school.common.config;
 
 import java.time.Duration;
+import java.util.Locale;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.util.unit.DataSize;
@@ -126,12 +128,30 @@ public record AppProperties(
 	 *
 	 * @param enabled              set to {@code false} in tests, and anywhere the database must not be
 	 *                             written to on startup
-	 * @param schoolConfigLocation any Spring resource location. The default ships inside the jar;
+	 * @param profile              from {@code SEED_PROFILE}; picks the seed that ships inside the jar,
+	 *                             {@code seed/<profile>-seed.json}
+	 * @param schoolConfigLocation any Spring resource location. When set it wins over {@code profile};
 	 *                             point it at {@code file:./seed/school-seed.json} to replace the seed
 	 *                             for a deployment without rebuilding.
 	 */
 	public record Seed(
 			@DefaultValue("true") boolean enabled,
-			@DefaultValue("classpath:seed/school-seed.json") @NotBlank String schoolConfigLocation) {
+			@DefaultValue("school") @NotNull Profile profile,
+			String schoolConfigLocation) {
+
+		/** The seed file to read: the explicit location if one is set, otherwise the profile's own. */
+		public String resolvedLocation() {
+			return schoolConfigLocation == null || schoolConfigLocation.isBlank()
+					? "classpath:seed/" + profile.name().toLowerCase(Locale.ROOT) + "-seed.json"
+					: schoolConfigLocation;
+		}
+
+		/** The bundled seeds. Each one names {@code seed/<lower-case name>-seed.json}. */
+		public enum Profile {
+
+			SCHOOL,
+
+			COLLEGE
+		}
 	}
 }

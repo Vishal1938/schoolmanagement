@@ -102,10 +102,13 @@ app:
     model: ${AI_MODEL:gpt-4o-mini}
     timeout: ${AI_TIMEOUT:30s}
   seed:
-    # First boot loads school_config from this file. Any Spring resource location works; point it at
-    # file:./seed/school-seed.json to change a deployment's seed without rebuilding.
+    # First boot loads school_config from the bundled seed for this profile: school or college
+    # (seed/school-seed.json or seed/college-seed.json).
     enabled: ${APP_SEED_ENABLED:true}
-    school-config-location: ${APP_SEED_SCHOOL_CONFIG:classpath:seed/school-seed.json}
+    profile: ${SEED_PROFILE:school}
+    # Wins over the profile when set. Any Spring resource location works; point it at
+    # file:./seed/school-seed.json to change a deployment's seed without rebuilding.
+    school-config-location: ${APP_SEED_SCHOOL_CONFIG:}
 
 management:
   endpoints:
