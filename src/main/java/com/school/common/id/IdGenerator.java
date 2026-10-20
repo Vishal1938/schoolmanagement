@@ -92,6 +92,19 @@ public class IdGenerator {
 		return counter.getSeq();
 	}
 
+	/**
+	 * Removes a counter, so the next number drawn under that key is 1 again.
+	 *
+	 * <p>The one exception to "a counter only moves forward", and it exists for exactly one caller:
+	 * wiping the demonstration data set (B20), which deletes the receipts that used those numbers.
+	 * Never call it while anything issued from that counter is still stored — the {@code uniqueId} and
+	 * {@code receiptNo} indexes are unique, so the collision would fail a write rather than quietly
+	 * hand out a number twice, but a failed payment is a poor way to find that out.
+	 */
+	public void resetSequence(String counterKey) {
+		mongo.remove(new Query(Criteria.where("_id").is(counterKey)), Counter.class);
+	}
+
 	/** The counter document key, e.g. {@code STU-26}. One counter per type and year. */
 	public static String counterKey(String prefix, int year) {
 		return prefix + "-" + twoDigitYear(year);

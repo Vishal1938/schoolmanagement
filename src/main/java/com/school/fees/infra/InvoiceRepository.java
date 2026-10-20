@@ -39,4 +39,7 @@ public interface InvoiceRepository extends MongoRepository<Invoice, String> {
 
 	List<Invoice> findBySessionIdAndClassIdAndStatusIn(String sessionId, String classId,
 			Collection<InvoiceStatus> statuses);
+
+	/** Everything billed in a session, for the demonstration data reset (B20). */
+	List<Invoice> findBySessionId(String sessionId);
 }

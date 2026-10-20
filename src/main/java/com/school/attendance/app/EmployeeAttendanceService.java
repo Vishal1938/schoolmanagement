@@ -84,13 +84,37 @@ public class EmployeeAttendanceService {
 
 	/** Submits or corrects the whole staff register for a day. */
 	public EmployeeRegisterResponse mark(LocalDate date, MarkEmployeeAttendanceRequest request) {
+		List<EmployeeAttendanceEntry> entries = (request.entries() == null
+				? List.<MarkEmployeeAttendanceRequest.Entry>of()
+				: request.entries()).stream()
+				.map(entry -> new EmployeeAttendanceEntry(entry.employeeUniqueId(), entry.status()))
+				.toList();
+		markDay(date, entries);
+		return register(date);
+	}
+
+	/**
+	 * The same, in this module's own types rather than the controller's request body.
+	 *
+	 * <p>For a caller in another module that marks many days in a row — B20's demonstration data
+	 * seeder, which fills a term of staff registers in. It answers with how many employees it marked
+	 * rather than with the whole register, because a caller writing ninety days does not want ninety
+	 * registers back.
+	 *
+	 * <p>Every calendar rule still applies: not a future date, a working day, not a holiday, and within
+	 * the correction window unless the caller holds {@code ATTENDANCE_CORRECT_ANY} — which an
+	 * administrator does, and which is what lets a past month be marked at all.
+	 *
+	 * @return how many entries were stored
+	 */
+	public int markDay(LocalDate date, List<EmployeeAttendanceEntry> marks) {
 		Optional<EmployeeAttendance> existing = attendance.findByDate(date);
 		Markability markability = calendar.check(date, existing.map(EmployeeAttendance::getMarkedAt).orElse(null));
 		if (!markability.allowed()) {
 			throw new BusinessRuleException(markability.reason());
 		}
 
-		List<EmployeeAttendanceEntry> entries = validatedEntries(request);
+		List<EmployeeAttendanceEntry> entries = validatedEntries(marks);
 		AuthPrincipal caller = CurrentUser.require();
 		Instant now = Instant.now(clock);
 
@@ -107,7 +131,7 @@ public class EmployeeAttendanceService {
 
 		EmployeeAttendance saved = save(toSave);
 		audit.record(AuditAction.EMPLOYEE_ATTENDANCE_MARKED, AUDIT_ENTITY, date.toString(), before, saved);
-		return register(date);
+		return entries.size();
 	}
 
 	// --- one employee's history -------------------------------------------------------------------
@@ -167,7 +191,7 @@ public class EmployeeAttendanceService {
 
 	// --- internals --------------------------------------------------------------------------------
 
-	private List<EmployeeAttendanceEntry> validatedEntries(MarkEmployeeAttendanceRequest request) {
+	private List<EmployeeAttendanceEntry> validatedEntries(List<EmployeeAttendanceEntry> requested) {
 		Set<String> active = employees.activeEmployees().stream()
 				.map(EmployeeRef::uniqueId)
 				.collect(Collectors.toSet());
@@ -175,9 +199,8 @@ public class EmployeeAttendanceService {
 		Set<String> seen = new LinkedHashSet<>();
 		List<EmployeeAttendanceEntry> entries = new ArrayList<>();
 
-		List<MarkEmployeeAttendanceRequest.Entry> requested = request.entries();
 		for (int i = 0; i < requested.size(); i++) {
-			MarkEmployeeAttendanceRequest.Entry entry = requested.get(i);
+			EmployeeAttendanceEntry entry = requested.get(i);
 			String employeeUniqueId = UserService.normalizeUniqueId(entry.employeeUniqueId());
 			String field = "entries[" + i + "].employeeUniqueId";
 			if (!active.contains(employeeUniqueId)) {

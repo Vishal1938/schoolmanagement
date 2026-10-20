@@ -131,9 +131,30 @@ public class FeeStructureService {
 	// --- writing ----------------------------------------------------------------------------------
 
 	public FeeStructure create(FeeStructureRequest request) {
-		String sessionId = academicContext.currentSessionId();
 		SchoolClass schoolClass = validatedClass(request.classId());
-		List<Installment> installments = validatedInstallments(request, schoolClass);
+		return write(schoolClass, validatedInstallments(request, schoolClass), toRule(request.lateFine()));
+	}
+
+	/**
+	 * The same, for a caller that has already built the installments.
+	 *
+	 * <p>The whole structure in one write — the semesters, the course-wide one-off fees and the
+	 * late-fine rule together — which is what {@link #setUpSemesters} and {@link #addOneTimeFee}
+	 * cannot do between them, because neither of those sets a late-fine rule. It is what B20's
+	 * demonstration data seeder uses to stand a college's fees up in one call per course.
+	 *
+	 * <p>Validated as strictly as the request path is: every head real and still active, names unique
+	 * within the structure, no {@code CUSTOM} installment, every {@code SEMESTER} carrying its period,
+	 * no two semesters sharing a day, and every section override naming a section the class has.
+	 */
+	public FeeStructure create(String classId, List<Installment> installments, LateFineRule lateFine) {
+		SchoolClass schoolClass = validatedClass(classId);
+		return write(schoolClass, validatedInstallments(installments, schoolClass), lateFine);
+	}
+
+	/** The insert both create paths share, so the conflict rule and the audit entry cannot differ. */
+	private FeeStructure write(SchoolClass schoolClass, List<Installment> installments, LateFineRule lateFine) {
+		String sessionId = academicContext.currentSessionId();
 		if (structures.findBySessionIdAndClassId(sessionId, schoolClass.getId()).isPresent()) {
 			throw new ConflictException(schoolClass.getName() + " already has a fee structure for this session. "
 					+ "Edit that one instead — a class can only have one.");
@@ -143,7 +164,7 @@ public class FeeStructureService {
 				.sessionId(sessionId)
 				.classId(schoolClass.getId())
 				.installments(installments)
-				.lateFine(toRule(request.lateFine()))
+				.lateFine(lateFine)
 				.createdAt(now)
 				.updatedAt(now)
 				.build());
@@ -820,6 +841,58 @@ public class FeeStructureService {
 	}
 
 	/**
+	 * The same checks for installments that were built rather than requested.
+	 *
+	 * <p>Shorter than {@link #validatedInstallments(FeeStructureRequest, SchoolClass)} only because
+	 * there is less to go wrong: a built {@link Installment} already holds its kind and its period as
+	 * the domain type, so the "both dates or neither" and "a one-off fee carries no period" rules are
+	 * not expressible mistakes. Everything that still is a mistake is checked, and all of it at once.
+	 */
+	private List<Installment> validatedInstallments(List<Installment> installments, SchoolClass schoolClass) {
+		List<FieldViolation> violations = new ArrayList<>();
+		Set<String> seenNames = new LinkedHashSet<>();
+		Set<String> headIds = new LinkedHashSet<>();
+
+		for (int i = 0; i < installments.size(); i++) {
+			Installment installment = installments.get(i);
+			String field = "installments[" + i + "]";
+			if (!seenNames.add(installment.name())) {
+				violations.add(new FieldViolation(field + ".name", "is listed twice"));
+			}
+			if (installment.resolvedKind() == InstallmentKind.CUSTOM) {
+				violations.add(new FieldViolation(field + ".kind",
+						"must be MONTHLY, SEMESTER or ONE_TIME; a charge for named students is "
+								+ "POST /fees/charges"));
+			}
+			if (installment.resolvedKind() == InstallmentKind.SEMESTER && installment.period() == null) {
+				violations.add(new FieldViolation(field + ".periodStart",
+						"a SEMESTER installment must state periodStart and periodEnd; unlike a month, its "
+								+ "period cannot be worked out from the due date"));
+			}
+			List<StructureItem> items = installment.items() == null ? List.of() : installment.items();
+			Set<String> seenHeads = new LinkedHashSet<>();
+			for (int j = 0; j < items.size(); j++) {
+				StructureItem item = items.get(j);
+				if (!seenHeads.add(item.headId())) {
+					violations.add(new FieldViolation(field + ".items[" + j + "].headId",
+							"is charged twice in this installment"));
+					continue;
+				}
+				headIds.add(item.headId());
+				validatedSectionAmounts(item.sectionAmounts(), schoolClass,
+						field + ".items[" + j + "].sectionAmounts", violations);
+			}
+		}
+
+		activeHeadsByIdIn(headIds, violations);
+		requireNoOverlappingSemesters(installments, violations);
+		if (!violations.isEmpty()) {
+			throw new ValidationException("The fee structure could not be saved", violations);
+		}
+		return List.copyOf(installments);
+	}
+
+	/**
 	 * The period on one requested installment, checked against its kind.
 	 *
 	 * <p>A SEMESTER must state both dates: its period is the one thing that cannot be derived, and a
@@ -915,10 +988,14 @@ public class FeeStructureService {
 
 	/** Every head the request mentions, keyed by id. Missing or retired ones become violations. */
 	private Map<String, FeeHead> activeHeadsFor(FeeStructureRequest request, List<FieldViolation> violations) {
-		Set<String> ids = request.installments().stream()
+		return activeHeadsByIdIn(request.installments().stream()
 				.flatMap(installment -> installment.items().stream())
 				.map(FeeStructureRequest.Item::headId)
-				.collect(Collectors.toCollection(LinkedHashSet::new));
+				.collect(Collectors.toCollection(LinkedHashSet::new)), violations);
+	}
+
+	/** The same for a set of ids already gathered, which is what both create paths end up with. */
+	private Map<String, FeeHead> activeHeadsByIdIn(Set<String> ids, List<FieldViolation> violations) {
 		Map<String, FeeHead> found = headService.findAllByIdIn(ids).stream()
 				.collect(Collectors.toMap(FeeHead::getId, head -> head));
 		for (String id : ids) {

@@ -15,6 +15,9 @@ public interface EmployeeAttendanceRepository extends MongoRepository<EmployeeAt
 
 	Optional<EmployeeAttendance> findByDate(LocalDate date);
 
+	/** Every register in a range, both ends inclusive. Backs the demonstration data wipe (B20). */
+	List<EmployeeAttendance> findByDateBetweenOrderByDateAsc(LocalDate from, LocalDate to);
+
 	List<EmployeeAttendance> findByEntriesEmployeeUniqueIdAndDateBetweenOrderByDateAsc(
 			String employeeUniqueId, LocalDate from, LocalDate to);
 }

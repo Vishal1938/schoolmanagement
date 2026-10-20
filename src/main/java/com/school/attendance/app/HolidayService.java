@@ -41,13 +41,21 @@ public class HolidayService {
 	}
 
 	public Holiday create(HolidayRequest request) {
-		if (holidays.existsByDate(request.date())) {
-			throw new ConflictException(request.date() + " is already a holiday");
+		return create(request.date(), request.name());
+	}
+
+	/**
+	 * The same, in this module's own types rather than the controller's request body — for a caller in
+	 * another module, such as B20's demonstration data seeder declaring a term's public holidays.
+	 */
+	public Holiday create(LocalDate date, String name) {
+		if (holidays.existsByDate(date)) {
+			throw new ConflictException(date + " is already a holiday");
 		}
 		try {
 			Holiday saved = holidays.insert(Holiday.builder()
-					.date(request.date())
-					.name(request.name().trim())
+					.date(date)
+					.name(name.trim())
 					.createdAt(Instant.now(clock))
 					.build());
 			audit.record(AuditAction.HOLIDAY_CREATED, AUDIT_ENTITY, saved.getId(), null, saved);
@@ -55,7 +63,7 @@ public class HolidayService {
 		}
 		catch (DuplicateKeyException ex) {
 			// The unique index is the real guard; this turns the driver's error into a 409.
-			throw new ConflictException(request.date() + " is already a holiday", ex);
+			throw new ConflictException(date + " is already a holiday", ex);
 		}
 	}
 

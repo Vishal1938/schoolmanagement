@@ -109,6 +109,10 @@ app:
     # Wins over the profile when set. Any Spring resource location works; point it at
     # file:./seed/school-seed.json to change a deployment's seed without rebuilding.
     school-config-location: ${APP_SEED_SCHOOL_CONFIG:}
+  demo-data:
+    # The one-time demonstration data set (B20). Off means /admin/demo-data does not exist, which is
+    # what a school's own deployment runs: the seeder writes a year of fees, payments and payroll.
+    enabled: ${DEMO_DATA_ENABLED:false}
 
 management:
   endpoints:

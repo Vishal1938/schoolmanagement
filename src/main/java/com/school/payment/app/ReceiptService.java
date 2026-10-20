@@ -102,6 +102,17 @@ public class ReceiptService {
 		renderAndStore(payment, key);
 	}
 
+	/**
+	 * Removes a stored receipt PDF, for the demonstration data reset (B20).
+	 *
+	 * <p>Package-private: the only legitimate reason to delete a receipt is that the payment behind it
+	 * is being deleted too, which only {@link PaymentDataResetService} does. Deleting a key that is not
+	 * there is not an error — a receipt nobody ever downloaded was never rendered.
+	 */
+	void deleteStored(String receiptNo) {
+		storage.delete(PREFIX + receiptNo + ".pdf");
+	}
+
 	private byte[] renderAndStore(Payment payment, String key) {
 		byte[] bytes = pdf.render(gather(payment));
 		storage.put(key, bytes, "application/pdf", Map.of("receiptno", payment.getReceiptNo()));

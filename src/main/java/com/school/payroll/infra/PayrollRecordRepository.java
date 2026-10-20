@@ -15,6 +15,15 @@ public interface PayrollRecordRepository extends MongoRepository<PayrollRecord, 
 	/** One month's register, in the order the run wrote it: by employee name. */
 	List<PayrollRecord> findByMonthOrderByEmployeeNameAsc(String month);
 
+	/**
+	 * Every record from one month to another, both ends inclusive.
+	 *
+	 * <p>A plain string range, which works because {@code yyyy-MM} sorts chronologically as text — see
+	 * {@code Months}. Backs the demonstration data guard and wipe (B20), both of which are about "the
+	 * months this academic session covers".
+	 */
+	List<PayrollRecord> findByMonthBetweenOrderByMonthAsc(String from, String to);
+
 	/** One employee's slips, newest month first. Behind {@code GET /payroll/mine}. */
 	List<PayrollRecord> findByEmployeeUniqueIdOrderByMonthDesc(String employeeUniqueId);
 

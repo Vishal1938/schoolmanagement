@@ -128,6 +128,13 @@ public enum Permission {
 	/** Reading the audit trail: it names who did what, so it is for administrators only. */
 	AUDIT_READ,
 
+	/**
+	 * Seeding and wiping the demonstration data set (B20), which is additionally gated by
+	 * {@code app.demo-data.enabled}. It writes fees, payments, payroll and attendance in bulk and
+	 * deletes them again, so it is an administrator's and nobody else's.
+	 */
+	DEMO_DATA_MANAGE,
+
 	/** The AI endpoints (B18), which are additionally gated by {@code app.features.ai}. */
 	AI_USE
 }

@@ -65,6 +65,7 @@ public final class HasPermission {
 
 	public static final String DASHBOARD_ADMIN = "hasAuthority('DASHBOARD_ADMIN')";
 	public static final String AUDIT_READ = "hasAuthority('AUDIT_READ')";
+	public static final String DEMO_DATA_MANAGE = "hasAuthority('DEMO_DATA_MANAGE')";
 	public static final String AI_USE = "hasAuthority('AI_USE')";
 
 	/**
