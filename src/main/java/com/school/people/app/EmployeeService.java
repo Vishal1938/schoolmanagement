@@ -256,16 +256,33 @@ public class EmployeeService {
 	 */
 	@Transactional
 	public EmployeeAdminView changeStatus(String uniqueId, EmployeeStatusRequest request) {
+		return adminView(setStatus(uniqueId, request.status()));
+	}
+
+	/**
+	 * Marks an employee as having left, disabling their login with it.
+	 *
+	 * <p>For a caller in another module — B20's demonstration data seeder, which lets one member of
+	 * staff go at the end of September so the October payroll run is visibly one person shorter.
+	 * {@code @Transactional} is repeated because the record and the login have to move together, and a
+	 * self-call from {@link #changeStatus} would miss the proxy.
+	 */
+	@Transactional
+	public void markLeft(String uniqueId) {
+		setStatus(uniqueId, EmployeeStatus.LEFT);
+	}
+
+	private Employee setStatus(String uniqueId, EmployeeStatus status) {
 		Employee before = require(uniqueId);
 		Employee saved = employees.save(before.toBuilder()
-				.status(request.status())
+				.status(status)
 				.updatedAt(Instant.now(clock))
 				.build());
 		if (saved.isHasLogin()) {
-			users.setEnabled(saved.getUniqueId(), request.status() == EmployeeStatus.ACTIVE);
+			users.setEnabled(saved.getUniqueId(), status == EmployeeStatus.ACTIVE);
 		}
 		audit.record(AuditAction.EMPLOYEE_STATUS_CHANGED, AUDIT_ENTITY, saved.getUniqueId(), before, saved);
-		return adminView(saved);
+		return saved;
 	}
 
 	/**

@@ -106,18 +106,36 @@ public class SalaryStructureService {
 	 *                           index on (employee, version) decides it and the loser reloads
 	 */
 	public SalaryStructureResponse save(String employeeUniqueId, SalaryStructureRequest request) {
-		EmployeeRef employee = employees.requireRef(employeeUniqueId);
 		validate(request);
+		saveVersion(employeeUniqueId, request.basic(), allowances(request), deductions(request),
+				request.effectiveFrom());
+		return view(employees.requireRef(employeeUniqueId).uniqueId());
+	}
 
+	/**
+	 * The same, in this module's own types rather than the controller's request body.
+	 *
+	 * <p>For a caller in another module that writes structures in bulk — B20's demonstration data
+	 * seeder, which agrees a basic for every member of staff and then revises one of them. It answers
+	 * with the version it wrote rather than with the whole history, which is what a bulk caller wants.
+	 *
+	 * <p>The validation the request path performs is not repeated: a built {@link DeductionRule} list
+	 * has no "percentage over 100" to catch beyond what {@link DeductionType} already caps, and a
+	 * structure that over-deducts is still refused, because nothing here would pay anybody less than
+	 * zero. A caller that assembles its own figures is trusted with them.
+	 */
+	public SalaryStructure saveVersion(String employeeUniqueId, long basic, List<SalaryComponent> allowances,
+			List<DeductionRule> deductions, LocalDate effectiveFrom) {
+		EmployeeRef employee = employees.requireRef(employeeUniqueId);
 		SalaryStructure previous = structures.findFirstByEmployeeUniqueIdOrderByVersionDesc(employee.uniqueId())
 				.orElse(null);
 		SalaryStructure structure = SalaryStructure.builder()
 				.employeeUniqueId(employee.uniqueId())
 				.version(previous == null ? 1 : previous.getVersion() + 1)
-				.basic(request.basic())
-				.allowances(allowances(request))
-				.deductions(deductions(request))
-				.effectiveFrom(request.effectiveFrom())
+				.basic(basic)
+				.allowances(allowances == null ? List.of() : allowances)
+				.deductions(deductions == null ? List.of() : deductions)
+				.effectiveFrom(effectiveFrom)
 				.createdBy(currentUniqueId())
 				.createdAt(Instant.now(clock))
 				.build();
@@ -132,7 +150,7 @@ public class SalaryStructureService {
 		}
 
 		audit.record(AuditAction.SALARY_STRUCTURE_VERSIONED, AUDIT_ENTITY, employee.uniqueId(), previous, saved);
-		return view(employee.uniqueId());
+		return saved;
 	}
 
 	// --- validation bean validation cannot express ------------------------------------------------

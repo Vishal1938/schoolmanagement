@@ -102,6 +102,17 @@ public class InvoiceService {
 	 * because re-running it finishes the job.
 	 */
 	public GenerateInvoicesResponse generate(String structureId) {
+		InvoiceCounts counts = generateFor(structureId);
+		return new GenerateInvoicesResponse(counts.created(), counts.skipped());
+	}
+
+	/**
+	 * The same, answering in this module's own type rather than in the controller's.
+	 *
+	 * <p>For a caller in another module that raises invoices as one step of something larger — B20's
+	 * demonstration data seeder, which generates for every course and then adds the counts up.
+	 */
+	public InvoiceCounts generateFor(String structureId) {
 		FeeStructure structure = structures.get(structureId);
 		List<Installment> installments = structure.getInstallments();
 		if (installments == null || installments.isEmpty()) {
@@ -131,7 +142,7 @@ public class InvoiceService {
 				Map.of("structureId", structureId, "classId", structure.getClassId(),
 						"sessionId", structure.getSessionId(), "students", roster.size(),
 						"installments", installments.size(), "created", created, "skipped", skipped));
-		return new GenerateInvoicesResponse(created, skipped);
+		return new InvoiceCounts(created, skipped);
 	}
 
 	/** @return true when the invoice was written, false when it already existed */
@@ -243,6 +254,30 @@ public class InvoiceService {
 		return new StudentFeeStatusResponse(student.uniqueId(), statuses.statusFor(student.uniqueId()));
 	}
 
+	/**
+	 * One student's whole ledger as stored, oldest installment first.
+	 *
+	 * <p>Narrower than {@link #ledgerFor} and with no caller check, because it is not reachable from a
+	 * request: it exists for B20's demonstration data seeder, which has to find "this student's
+	 * Semester 1 invoice" before it can pay it. Callers in other modules are behind
+	 * {@code DEMO_DATA_MANAGE}; anything a person reads goes through {@link #ledgerFor}, which does
+	 * check, and which also computes the live late fine that is deliberately absent here.
+	 */
+	public List<Invoice> invoicesOf(String studentUniqueId) {
+		return invoices.findByStudentUniqueIdOrderByDueDateAsc(studentUniqueId);
+	}
+
+	/**
+	 * Every invoice of one session, whatever its status — including the cancelled ones.
+	 *
+	 * <p>For the demonstration data reset, which has to know which invoices a session holds before it
+	 * can find the payments that point at them. {@code CANCELLED} rows are in: they are still invoices
+	 * of the session, and leaving them behind is exactly what a wipe must not do.
+	 */
+	public List<Invoice> invoicesInSession(String sessionId) {
+		return invoices.findBySessionId(sessionId);
+	}
+
 	// --- quoting ----------------------------------------------------------------------------------
 
 	/**
@@ -260,6 +295,18 @@ public class InvoiceService {
 	 * @throws BusinessRuleException if there is nothing left to pay
 	 */
 	public FeeQuote quoteForPayment(String studentUniqueId, List<String> invoiceIds) {
+		return quoteForPayment(studentUniqueId, invoiceIds, statuses.today());
+	}
+
+	/**
+	 * The same quote as of a given date rather than as of today.
+	 *
+	 * <p>Only the late fine moves: the principal is stored, and {@code asOf} decides how many days of
+	 * fine have run. Today is what every online and counter flow passes; a date in the past is what a
+	 * <strong>backdated</strong> payment passes, because a cheque banked on 25 August owes the fine
+	 * that had accrued by 25 August and not the one that has accrued since.
+	 */
+	public FeeQuote quoteForPayment(String studentUniqueId, List<String> invoiceIds, LocalDate asOf) {
 		List<Invoice> selected = payableInvoices(studentUniqueId, invoiceIds);
 		List<FieldViolation> violations = new ArrayList<>();
 		for (Invoice invoice : selected) {
@@ -271,7 +318,7 @@ public class InvoiceService {
 		if (!violations.isEmpty()) {
 			throw new ValidationException("Those invoices cannot be paid", violations);
 		}
-		long due = dueTotal(selected);
+		long due = dueTotal(selected, asOf);
 		if (due <= 0L) {
 			throw new BusinessRuleException("There is nothing left to pay on the invoices you selected.");
 		}
@@ -292,6 +339,15 @@ public class InvoiceService {
 	 * @throws BusinessRuleException if there is nothing left to pay
 	 */
 	public CounterQuote quoteForCounter(List<String> invoiceIds) {
+		return quoteForCounter(invoiceIds, statuses.today());
+	}
+
+	/**
+	 * The same, with the late fine charged as of {@code asOf} — the date the money was received, which
+	 * for a counter entry made days later is not today. See
+	 * {@link #quoteForPayment(String, List, LocalDate)}.
+	 */
+	public CounterQuote quoteForCounter(List<String> invoiceIds, LocalDate asOf) {
 		List<Invoice> found = invoices.findAllByIdIn(invoiceIds);
 		if (found.isEmpty()) {
 			throw new ValidationException("No invoices were selected",
@@ -306,7 +362,7 @@ public class InvoiceService {
 		String studentUniqueId = owners.iterator().next();
 		// Reuses the strict quote, so an id that is not really theirs, a cancelled invoice or one that
 		// is already settled is refused here exactly as it is in the online flow.
-		FeeQuote quote = quoteForPayment(studentUniqueId, invoiceIds);
+		FeeQuote quote = quoteForPayment(studentUniqueId, invoiceIds, asOf);
 		return new CounterQuote(studentUniqueId, quote.invoiceIds(), quote.amountDue());
 	}
 
@@ -349,19 +405,20 @@ public class InvoiceService {
 				.filter(invoice -> studentUniqueId.equals(invoice.getStudentUniqueId()))
 				.filter(invoice -> invoice.getStatus() != InvoiceStatus.CANCELLED)
 				.toList();
-		return new FeeQuote(open.stream().map(Invoice::getId).toList(), dueTotal(open));
+		// Today, deliberately: a gateway capture is arriving now, whatever the order said minutes ago.
+		return new FeeQuote(open.stream().map(Invoice::getId).toList(), dueTotal(open, statuses.today()));
 	}
 
 	/**
-	 * Outstanding principal plus today's late fine across these invoices, in paise. The single
-	 * definition of "what these come to", shared by both quotes and by the allocation's own ceiling.
+	 * Outstanding principal plus the late fine as of {@code asOf} across these invoices, in paise. The
+	 * single definition of "what these come to", shared by both quotes and by the allocation's own
+	 * ceiling.
 	 */
-	private long dueTotal(List<Invoice> selected) {
+	private long dueTotal(List<Invoice> selected, LocalDate asOf) {
 		Map<String, LateFineRule> rules = structures.lateFineRulesOf(FeeStatusReader.structureIdsOf(selected));
-		LocalDate today = statuses.today();
 		return selected.stream()
 				.mapToLong(invoice -> invoice.outstanding()
-						+ LateFine.dueOn(invoice, rules.get(invoice.getStructureId()), today))
+						+ LateFine.dueOn(invoice, rules.get(invoice.getStructureId()), asOf))
 				.sum();
 	}
 
@@ -391,11 +448,30 @@ public class InvoiceService {
 	 * @throws BusinessRuleException if {@code amount} exceeds what these invoices come to
 	 */
 	public List<InvoiceAllocation> allocate(String studentUniqueId, List<String> invoiceIds, long amount) {
+		return allocate(studentUniqueId, invoiceIds, amount, statuses.today());
+	}
+
+	/**
+	 * The same, with the late fine charged as of {@code asOf} rather than as of today.
+	 *
+	 * <p>This is what makes a <strong>backdated</strong> payment correct rather than merely recorded
+	 * under an earlier date. A cheque received on 25 August and entered a fortnight later owes the fine
+	 * that had accrued by the 25th; charging today's fine would take the extra fortnight out of the
+	 * principal, leaving the family short-paid on a bill they settled in full.
+	 *
+	 * <p>What is collected is then <strong>frozen on the invoice</strong> as {@code lateFinePaid},
+	 * exactly as a same-day payment's is, so it is never charged twice however long the invoice stays
+	 * open afterwards.
+	 *
+	 * @param asOf the date the money was received, which may not usefully be in the future — the
+	 *             caller is expected to have clamped it to today
+	 */
+	public List<InvoiceAllocation> allocate(String studentUniqueId, List<String> invoiceIds, long amount,
+			LocalDate asOf) {
 		List<Invoice> selected = payableInvoices(studentUniqueId, invoiceIds);
 		Map<String, LateFineRule> rules = structures.lateFineRulesOf(FeeStatusReader.structureIdsOf(selected));
-		LocalDate today = statuses.today();
 
-		long totalDue = dueTotal(selected);
+		long totalDue = dueTotal(selected, asOf);
 		if (amount > totalDue) {
 			throw new BusinessRuleException("That is more than these invoices come to. They total "
 					+ rupees(totalDue) + " including any late fine, and " + rupees(amount) + " was offered. "
@@ -413,7 +489,7 @@ public class InvoiceService {
 			if (remaining <= 0L) {
 				break;
 			}
-			long fineDue = LateFine.dueOn(before, rules.get(before.getStructureId()), today);
+			long fineDue = LateFine.dueOn(before, rules.get(before.getStructureId()), asOf);
 			long fine = Math.min(remaining, fineDue);
 			remaining -= fine;
 			long principal = Math.min(remaining, before.outstanding());

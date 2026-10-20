@@ -2,6 +2,7 @@ package com.school.fees.app;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -98,12 +99,33 @@ public class StudentChargeService {
 		List<StudentChargeResponse.Charge> charges = new ArrayList<>(roster.size());
 		for (StudentRef student : roster) {
 			InvoiceItem item = new InvoiceItem(head.getId(), head.getName(), request.amount());
-			Invoice saved = insert(student, sessionId, label, item, request, note, now);
+			Invoice saved = insert(student, sessionId, label, item, request.dueDate(), note, now);
 			audit.record(AuditAction.FEE_CHARGE_CREATED, AUDIT_ENTITY, saved.getId(), null, saved);
 			charges.add(new StudentChargeResponse.Charge(saved.getId(), student.uniqueId(), student.name(),
 					saved.getInstallmentName(), saved.displayLabel(), saved.getNetAmount()));
 		}
 		return new StudentChargeResponse(charges.size(), charges);
+	}
+
+	/**
+	 * Raises one charge against one student, answering with the invoice itself.
+	 *
+	 * <p>The same write {@link #raise} performs per student — the same head check, the same name
+	 * suffixing, the same audit entry — for a caller in another module that needs the invoice id back
+	 * so it can go on and pay it. B20's demonstration data seeder raises a library fine and then
+	 * receipts it.
+	 */
+	@Transactional
+	public Invoice raiseOne(String studentUniqueId, String name, String headId, long amount, LocalDate dueDate,
+			String note) {
+		FeeHead head = validatedActiveHead(headId);
+		StudentRef student = students.requireRef(studentUniqueId);
+		String label = name.trim();
+		Invoice saved = insert(student, academicContext.currentSessionId(), label,
+				new InvoiceItem(head.getId(), head.getName(), amount), dueDate, trimToNull(note),
+				Instant.now(clock));
+		audit.record(AuditAction.FEE_CHARGE_CREATED, AUDIT_ENTITY, saved.getId(), null, saved);
+		return saved;
 	}
 
 	/**
@@ -143,7 +165,7 @@ public class StudentChargeService {
 	 * family sees the same words on both bills, and the index still does its job.
 	 */
 	private Invoice insert(StudentRef student, String sessionId, String label, InvoiceItem item,
-			StudentChargeRequest request, String note, Instant now) {
+			LocalDate dueDate, String note, Instant now) {
 		for (int attempt = 1; attempt <= MAX_NAME_ATTEMPTS; attempt++) {
 			String name = attempt == 1 ? label : label + " (" + attempt + ")";
 			try {
@@ -156,7 +178,7 @@ public class StudentChargeService {
 						.kind(InstallmentKind.CUSTOM)
 						.label(label)
 						.note(note)
-						.dueDate(request.dueDate())
+						.dueDate(dueDate)
 						.items(List.of(item))
 						.concessionAmount(0L)
 						.netAmount(item.amount())

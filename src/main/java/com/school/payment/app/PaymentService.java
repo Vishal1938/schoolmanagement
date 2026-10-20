@@ -2,6 +2,7 @@ package com.school.payment.app;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 import com.school.common.audit.AuditAction;
@@ -21,6 +22,7 @@ import com.school.fees.app.InvoiceService;
 import com.school.payment.api.MarkPaidRequest;
 import com.school.payment.api.OfflinePaymentRequest;
 import com.school.payment.domain.HeadAllocation;
+import com.school.payment.domain.PayerRelation;
 import com.school.payment.domain.Payment;
 import com.school.payment.domain.PaymentAllocation;
 import com.school.payment.domain.PaymentMode;
@@ -99,8 +101,11 @@ public class PaymentService {
 		StudentRef student = students.requireRef(request.studentUniqueId());
 		requireReference(request);
 
+		// As of the day the money was received, not as of today: a cheque banked on the 25th and
+		// entered a fortnight later owes the fine that had accrued by the 25th. Charging today's would
+		// take the extra fortnight out of the principal and leave the family short-paid.
 		List<InvoiceAllocation> applied = invoices.allocate(student.uniqueId(), request.invoiceIds(),
-				request.amount());
+				request.amount(), fineDateOf(request.paidAt()));
 		Instant now = Instant.now(clock);
 		AuthPrincipal clerk = CurrentUser.require();
 
@@ -139,15 +144,75 @@ public class PaymentService {
 	 */
 	@Transactional
 	public Payment markPaid(MarkPaidRequest request) {
-		InvoiceService.CounterQuote quote = invoices.quoteForCounter(request.invoiceIds());
 		// Midnight of that day in the school's own zone, not UTC's: in India the difference puts an
 		// evening payment into the previous day's collection report.
 		Instant paidAt = request.paidOn() == null
 				? Instant.now(clock)
 				: request.paidOn().atStartOfDay(clock.getZone()).toInstant();
+		// Quoted as of that date, so "in full" for a backdated entry means the fine that had run by
+		// then. record() recomputes the same date from paidAt, so the quote and the allocation agree.
+		InvoiceService.CounterQuote quote = invoices.quoteForCounter(request.invoiceIds(), fineDateOf(paidAt));
 		return record(new OfflinePaymentRequest(quote.studentUniqueId(), quote.invoiceIds(), quote.amountDue(),
 				request.modeOrDefault(), request.reference(), request.payerName(),
 				request.payerRelationOrDefault(), paidAt));
+	}
+
+	/**
+	 * The date a payment's late fine is charged as of: the day the money was received, in the school's
+	 * own timezone, and never later than today.
+	 *
+	 * <p>Clamped because a future {@code paidAt} would quote a fine nobody owes yet and then take it
+	 * out of the principal. Money is recorded as it arrives, so a date ahead of today is a typo, and
+	 * treating it as today is the reading that cannot overcharge.
+	 */
+	private LocalDate fineDateOf(Instant paidAt) {
+		LocalDate today = LocalDate.now(clock);
+		if (paidAt == null) {
+			return today;
+		}
+		LocalDate on = LocalDate.ofInstant(paidAt, clock.getZone());
+		return on.isAfter(today) ? today : on;
+	}
+
+	// --- recording, for another module ------------------------------------------------------------
+
+	/**
+	 * Records a counter payment of a stated amount, taking this module's own types rather than the
+	 * controller's request body.
+	 *
+	 * <p>For a caller in another module that takes money as one step of something larger — B20's
+	 * demonstration data seeder, which walks a year of backdated payments in date order so the receipt
+	 * numbers come out ascending. It is {@link #record} underneath, with the same transaction, the same
+	 * allocation and the same receipt numbering; the annotation is repeated because a self-call would
+	 * otherwise miss the proxy and run outside a transaction.
+	 *
+	 * @param paidOn the day the money was received; null means today. The late fine is charged as of
+	 *               this date, not as of today
+	 */
+	@Transactional
+	public Payment recordOffline(String studentUniqueId, List<String> invoiceIds, long amount, PaymentMode mode,
+			String reference, String payerName, PayerRelation payerRelation, LocalDate paidOn) {
+		return record(new OfflinePaymentRequest(studentUniqueId, invoiceIds, amount, mode, reference, payerName,
+				payerRelation, atStartOfDay(paidOn)));
+	}
+
+	/**
+	 * Settles the named invoices in full — principal plus the late fine as of {@code paidOn} — as one
+	 * counter payment, again in this module's own types.
+	 *
+	 * <p>{@link #markPaid} underneath, so there is still no amount for a caller to get wrong: the
+	 * figure is quoted from the invoices. All the ids have to be one student's, because one payment
+	 * produces one receipt.
+	 */
+	@Transactional
+	public Payment markPaidInFull(List<String> invoiceIds, PaymentMode mode, String reference, String payerName,
+			PayerRelation payerRelation, LocalDate paidOn) {
+		return markPaid(new MarkPaidRequest(invoiceIds, mode, reference, paidOn, payerName, payerRelation));
+	}
+
+	/** Midnight of that day in the school's own zone, or now when no day was given. */
+	private Instant atStartOfDay(LocalDate date) {
+		return date == null ? Instant.now(clock) : date.atStartOfDay(clock.getZone()).toInstant();
 	}
 
 	/**

@@ -389,13 +389,30 @@ public class StudentService {
 
 	/** Moves a student between ACTIVE, LEFT and ALUMNI. A no-op change is still recorded as one. */
 	public StudentAdminView changeStatus(String uniqueId, StudentStatusRequest request) {
+		Student saved = setStatus(uniqueId, request.status());
+		return StudentAdminView.of(saved, classNameOf(saved), feeStatuses.statusFor(saved.getUniqueId()));
+	}
+
+	/**
+	 * Marks a student as having left, which takes them off every register and out of every invoice run
+	 * while leaving their records exactly where they are.
+	 *
+	 * <p>For a caller in another module — B20's demonstration data seeder, which withdraws one student
+	 * part-way through the year after their payments have been applied. The {@code LEFT} status carries
+	 * no date, here or on the endpoint: when somebody left is in the audit trail, not on the document.
+	 */
+	public void markLeft(String uniqueId) {
+		setStatus(uniqueId, StudentStatus.LEFT);
+	}
+
+	private Student setStatus(String uniqueId, StudentStatus status) {
 		Student before = require(uniqueId);
 		Student saved = students.save(before.toBuilder()
-				.status(request.status())
+				.status(status)
 				.updatedAt(Instant.now(clock))
 				.build());
 		audit.record(AuditAction.STUDENT_STATUS_CHANGED, AUDIT_ENTITY, before.getUniqueId(), before, saved);
-		return StudentAdminView.of(saved, classNameOf(saved), feeStatuses.statusFor(saved.getUniqueId()));
+		return saved;
 	}
 
 	/**
@@ -485,6 +502,24 @@ public class StudentService {
 	 * <p>A deliberately narrow second projection: a name, an email and a phone number, and none of the
 	 * guardian names, address or admission history that sit beside them on the document.
 	 */
+	/**
+	 * Who a receipt can be made out to besides the student: the names of the father, the mother and
+	 * the guardian, with nothing else from the family block.
+	 *
+	 * <p>As narrow as {@link #contactFor} and for the same reason. Payments carry a free-text
+	 * "paid by" name because there are no parent logins in this system, and the office fills it from
+	 * what is on file — so a module that takes money has to be able to read these three names and
+	 * must not be in a position to read a phone number or an address alongside them.
+	 *
+	 * @return every field null when the student has no family details recorded
+	 */
+	public GuardianNames guardianNamesOf(String uniqueId) {
+		Guardians guardians = require(uniqueId).getGuardians();
+		return guardians == null
+				? new GuardianNames(null, null, null)
+				: new GuardianNames(guardians.fatherName(), guardians.motherName(), guardians.guardianName());
+	}
+
 	public StudentContact contactFor(String uniqueId) {
 		Student student = require(uniqueId);
 		Guardians guardians = student.getGuardians();

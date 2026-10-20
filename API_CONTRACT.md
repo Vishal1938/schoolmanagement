@@ -164,6 +164,7 @@ name exactly as written here. ADMIN holds all of them; the other three hold what
 | `DASHBOARD_ADMIN` | | | | The admin dashboard aggregates |
 | `AUDIT_READ` | | | | Read the audit trail, including one exam paper's access log |
 | `AI_USE` | ✓ | | | The AI endpoints, additionally gated by `app.features.ai` |
+| `DEMO_DATA_MANAGE` | | | | Seed and wipe the demonstration data set, additionally gated by `app.demo-data.enabled` |
 
 A permission is coarse — "may enter marks at all". Object-level rules, such as a teacher only reaching
 their own classes or a student only their own records, are enforced per service and surface as 403
@@ -1724,8 +1725,8 @@ session.
 every month and fee it covered.
 
 - **There is no `amount`, and there cannot be.** The server quotes the invoices itself — outstanding
-  principal plus whatever late fine is running today — and takes exactly that. CLAUDE.md rule 4 in
-  its strongest form: the client cannot even express a figure.
+  principal plus whatever late fine had run **as of `paidOn`** — and takes exactly that. CLAUDE.md
+  rule 4 in its strongest form: the client cannot even express a figure.
 - **Every invoice must be the same student's** → 400 otherwise. One payment has one payer and
   produces one receipt, and a receipt listing two families' months is not a document anybody can
   file.
@@ -1783,13 +1784,19 @@ Read a filtered report as "what these students owe *for this*", not as their pos
 - `paidAt` is optional and defaults to now. Send it when the money arrived on a different day from
   the one it is being entered on: the collection report groups on this, not on when the row was
   written.
+- **A backdated `paidAt` backdates the late fine with it.** The fine charged is the one that had
+  accrued by that day, not the one that has accrued since — a cheque received on 25 August owes ten
+  days' fine however long it sits in the in-tray. A `paidAt` in the future is treated as now, so it
+  can never quote a fine nobody owes yet. Whatever fine is collected is frozen on the invoice as
+  `lateFinePaid` and is never charged again; the fine still *owing* on a `PARTIAL` invoice keeps
+  running, which is what `lateFineDue` reports.
 - `payerRelation` is `SELF`, `FATHER`, `MOTHER`, `GUARDIAN` or `OTHER`. There are no parent accounts,
   so `payerName` is the only record of who actually paid, and it is printed on the receipt.
 
 **The amount is checked, never trusted** (CLAUDE.md rule 4). The server works out what the selected
-invoices come to — outstanding principal plus the live late fine — and **refuses anything more than
-that** with 422, rather than holding the excess as a credit nobody can account for later. Less is
-fine. An invoice id that is not that student's, or that has been cancelled, is 400 naming the
+invoices come to — outstanding principal plus the late fine as of `paidAt` — and **refuses anything
+more than that** with 422, rather than holding the excess as a credit nobody can account for later.
+Less is fine. An invoice id that is not that student's, or that has been cancelled, is 400 naming the
 offending index.
 
 **Allocation order is fixed: oldest `dueDate` first, and within an invoice the late fine before the
@@ -2406,6 +2413,140 @@ paged as in §1.
   by a TTL. Actions audited so far: `SCHOOL_CONFIG_SEEDED`, `SCHOOL_CONFIG_UPDATED`, and the
   authentication actions listed in §3's companion set (`LOGIN_SUCCESS`, `LOGIN_FAILURE`,
   `ACCOUNT_LOCKED`, `PASSWORD_CHANGED`, `LOGOUT`, `REFRESH_TOKEN_REUSE_REVOKED`) once B2 ships.
+
+### Demo data (behind feature flag `app.demo-data.enabled`)
+| Method | Path | Who |
+|---|---|---|
+| POST | `/admin/demo-data/seed?force=` | `DEMO_DATA_MANAGE` (ADMIN) |
+| DELETE | `/admin/demo-data` | `DEMO_DATA_MANAGE` (ADMIN) |
+
+A worked college year you can click around in: a whole 2026-27 session of fees, backdated payments,
+receipts, salary structures, staff attendance and payroll, written **through the ordinary services**
+rather than loaded as fixtures. Everything therefore validates, audits and numbers itself exactly as
+it would had somebody typed it in, which is the point — the registers, the defaulters list, the
+collection report and the dashboards all reconcile because nothing took a short cut to get there.
+
+**`DEMO_DATA_ENABLED` is `false` by default, and both paths are then 404** — not
+`FEATURE_DISABLED`, just absent: the controller is not registered at all, so there is no code path
+that could write a hundred payments into a school's live database. An **unauthenticated** call is
+401, as it is everywhere, because the filter chain rejects it before routing.
+
+#### `POST /admin/demo-data/seed`
+
+Takes no body. → 201 with a summary:
+
+```json
+{
+  "feeHeads": 5, "feeStructures": 5, "holidays": 2,
+  "invoicesCreated": 740, "invoicesSkipped": 0, "individualCharges": 3,
+  "payments": 89,
+  "paymentsByMode": {
+    "BANK_TRANSFER": { "count": 29, "amount": 2871500 },
+    "CASH": { "count": 31, "amount": 1402000 },
+    "CHEQUE": { "count": 15, "amount": 180000 },
+    "UPI_OFFLINE": { "count": 14, "amount": 921300 }
+  },
+  "totalCollected": 5374800, "receiptsIssued": 89,
+  "salaryStructures": 13, "salaryAdvances": 1,
+  "attendanceDaysMarked": 94, "attendanceMarks": 1222,
+  "payrollByMonth": {
+    "2026-07": { "created": 12, "paid": 12, "pending": 0 },
+    "2026-08": { "created": 12, "paid": 12, "pending": 0 },
+    "2026-09": { "created": 12, "paid": 12, "pending": 0 },
+    "2026-10": { "created": 11, "paid": 0, "pending": 11 }
+  },
+  "studentsMarkedLeft": 1, "employeesMarkedLeft": 1,
+  "warnings": ["No active employee called Smt. Kavita Mishra, so their absences were not marked and they are PRESENT throughout."]
+}
+```
+
+The figures depend on how many students and staff are on the roll; the shape does not. All amounts
+are paise.
+
+**Prerequisites**, each a 422 `UNPROCESSABLE` naming what to create:
+
+| Missing | Fix |
+|---|---|
+| An active session running `2026-07-01` to `2027-06-30` | `POST /sessions` then `POST /sessions/{id}/activate` |
+| `academicSettings.feeCycle` other than `SEMESTER` | `PUT /school/config` |
+| Any of `BA - Year 1`, `BA - Year 2`, `BA - Year 3`, `BTC - Year 1`, `BTC - Year 2`, or one with no sections | `POST /classes` |
+| No active students in the session, or no active employees | `POST /students`, `POST /employees`, or the Excel imports |
+
+The dates are checked rather than only the session name, because every due date and payroll month in
+the data set is a literal — writing them into an April-to-March session would date invoices outside
+their own year.
+
+**Individual people are warned about, not refused.** The data set names a few students and staff by
+name — one student who leaves, one salary revision, one advance, three absences, three individual
+charges — and anything it cannot find goes into `warnings` while the rest of the run proceeds. A
+`warnings` array is not a failure.
+
+**409 `CONFLICT` if the active session already holds payments or payroll records.** Those are the two
+things that cannot be seeded twice: a second payment against the same invoice really is a second
+payment with its own receipt, and a payroll run skips a month that already has records rather than
+replacing it, leaving two data sets interleaved. Wipe first, or pass **`?force=true`** to skip the
+check — which is for the one case where a wipe was interrupted and left something behind.
+
+What it writes, in order:
+
+1. **Holidays** — 15 Aug and 2 Oct 2026. First, because the staff register refuses to be marked on one.
+2. **Fee heads** — Semester fee, Admission fee, Exam fee, Library fine, Certificate fee. Existing heads of the same name are reused as they are.
+3. **Fee structures** — one per course, written whole: both semesters (numbered `2N-1` and `2N` from the course's "Year N"), the two exam fees, the admission fee for first years, and a `PER_DAY` late fine of ₹10 after 15 days' grace capped at ₹500. Then invoices for every active student.
+4. **Payments** — five patterns by `(rollNo - 1) % 5` within each course and section, so every section has somebody who paid on time, somebody who paid late with a fine, somebody part-paying, a defaulter and somebody a year ahead. The first on-time student of each course pays an exam fee **today**, so "today's collection" is never zero.
+5. **Individual charges** — two library fines left unpaid and a certificate fee paid two days late. A `CUSTOM` charge belongs to no structure, so no late fine ever reaches it.
+6. **One student withdrawn**, after their payments have been applied.
+7. **Salary structures** — faculty, with a higher basic for a doctorate; the non-teaching roles by designation; one mid-year revision written as a second version; and **one member of staff deliberately left with no structure**, so every run has somebody to report under `missingStructure`.
+8. **One advance**, recovered monthly.
+9. **Staff attendance** — every working day (from `academicSettings.workingDays`, skipping holidays) from 1 July to **yesterday**. Today is left unmarked, so the register opens on a day that still needs doing.
+10. **Payroll** — four prorated runs; the first three paid by `BANK_TRANSFER` on the last day of their month, the last left entirely `PENDING`.
+
+**Every payment is taken in `paidOn` order**, so receipt numbers ascend with their dates. **Every late
+fine is charged as of the day the money arrived**, not as of today, and frozen on the invoice — see
+`POST /fees/offline-payment`.
+
+It is **not** one transaction, and could not be: each payment draws a receipt number and has to
+commit on its own. A run that fails part-way leaves what it had already written, which is what the
+wipe is for. Expect it to take a couple of minutes.
+
+#### `DELETE /admin/demo-data`
+
+→ 200 with what it deleted, for the active session:
+
+```json
+{ "deleted": {
+  "concessions": 0, "employeeAttendanceDays": 94, "feeStructures": 5, "holidays": 2,
+  "invoices": 743, "payments": 89, "payrollRecords": 47, "receiptCounterReset": true,
+  "receiptFiles": 89, "salaryAdvances": 1, "salaryStructures": 13
+} }
+```
+
+Fee structures, invoices, concessions, payments, receipt PDFs, salary structures, advances, payroll
+records, employee attendance and holidays go, and the receipt counter is reset so the next run
+numbers from 1 again.
+
+**Students, employees, user accounts, courses, subjects, sessions, fee heads and the school
+configuration are not touched.** The seeder asks for those to exist and did not create them, so a
+wipe leaves a college that can be seeded again rather than an empty database.
+
+Two things it deliberately does not undo:
+
+- The withdrawn student and the departed employee **keep their `LEFT` status**, because this does not
+  touch people at all. A second run will warn that neither is on the roll. Put them back with
+  `PATCH /students/{uniqueId}/status` and `PATCH /employees/{uniqueId}/status` first if you want an
+  identical run.
+- A **paid** payroll record is deleted here, which `DELETE /payroll/records/{id}` refuses outright.
+  That rule is right for a correction to one person's pay and does not apply to the whole
+  demonstration set going at once.
+
+Both actions are audited as `DEMO_DATA_SEEDED` and `DEMO_DATA_RESET`, with the counts in `after`.
+Everything they create or delete underneath also writes its own ordinary audit entry, so the trail
+shows a hundred `PAYMENT_RECORDED` rows and not one summary line.
+
+#### Configuration
+
+`DEMO_DATA_ENABLED` (default `false`). That is the whole of it: the data set itself is fixed, because
+its value is being a known, dated, reproducible example — dates relative to "now" would give a
+different story on every run and no late fine at all on the day it was seeded.
 
 ### AI (behind feature flag `app.features.ai`)
 | Method | Path | Who |

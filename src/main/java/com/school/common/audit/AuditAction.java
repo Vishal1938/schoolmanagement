@@ -327,5 +327,20 @@ public enum AuditAction {
 	 * corrected. {@code before} is the whole record, so what was discarded is recoverable. A PAID
 	 * record can never reach here.
 	 */
-	PAYROLL_RECORD_DELETED
+	PAYROLL_RECORD_DELETED,
+
+	// --- demonstration data (B20) ---------------------------------------------------------------
+
+	/**
+	 * The demonstration data set was seeded. The entity is the session it was written into, and
+	 * {@code after} holds the summary counts — every structure, invoice, payment, payroll record and
+	 * register it created also has its own entry, written by the module that owns it.
+	 */
+	DEMO_DATA_SEEDED,
+
+	/**
+	 * The demonstration data set was wiped. {@code after} holds what was deleted, per collection.
+	 * Students, employees, logins, courses and the school configuration are never touched by it.
+	 */
+	DEMO_DATA_RESET
 }

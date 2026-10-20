@@ -1,6 +1,7 @@
 package com.school.payment.infra;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -33,6 +34,12 @@ public interface PaymentRepository extends MongoRepository<Payment, String> {
 	 */
 	@Query(value = "{ 'status': ?0, 'paidAt': { '$gte': ?1, '$lt': ?2 } }", sort = "{ 'paidAt': 1 }")
 	List<Payment> findCapturedInRange(PaymentStatus status, Instant from, Instant to);
+
+	/**
+	 * Payments raised against any of these invoices, for the demonstration data reset (B20): a payment
+	 * carries no session, so "this session's payments" is asked of the invoices it names.
+	 */
+	List<Payment> findByInvoiceIdsIn(Collection<String> invoiceIds);
 
 	/**
 	 * Our payment for a gateway order. The order id is all the verify call and the webhook carry, so

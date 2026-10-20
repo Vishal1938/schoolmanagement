@@ -114,7 +114,18 @@ public class PayrollService {
 	 * @throws BusinessRuleException 422 for a month that has not happened yet
 	 */
 	public PayrollRunResponse run(PayrollRunRequest request) {
-		YearMonth month = Months.parse(request.month(), "month");
+		PayrollRunResult result = runFor(Months.parse(request.month(), "month"), request.prorateByAttendance());
+		return new PayrollRunResponse(result.month(), result.prorateByAttendance(), result.created(),
+				result.skipped(), result.missingStructure());
+	}
+
+	/**
+	 * The same run, taking a {@link YearMonth} and answering in this module's own type.
+	 *
+	 * <p>For a caller in another module that runs several months in a row — B20's demonstration data
+	 * seeder, which runs July to October and pays the first three.
+	 */
+	public PayrollRunResult runFor(YearMonth month, boolean prorateByAttendance) {
 		if (month.isAfter(YearMonth.from(LocalDate.now(clock)))) {
 			throw new BusinessRuleException("Payroll cannot be run for " + month
 					+ ", which has not happened yet. There is no attendance to prorate by and no month to pay for.");
@@ -144,7 +155,7 @@ public class PayrollService {
 				missingStructure.add(employee.name() + " (" + employee.uniqueId() + ")");
 				continue;
 			}
-			PayrollRecord computed = compute(employee, structure.get(), month, request.prorateByAttendance(), runBy);
+			PayrollRecord computed = compute(employee, structure.get(), month, prorateByAttendance, runBy);
 			try {
 				PayrollRecord saved = records.insert(computed);
 				audit.record(AuditAction.PAYROLL_RECORD_CREATED, AUDIT_ENTITY, saved.getId(), null, saved);
@@ -157,16 +168,16 @@ public class PayrollService {
 			}
 		}
 
-		PayrollRunResponse response = new PayrollRunResponse(key, request.prorateByAttendance(), created, skipped,
-				missingStructure);
+		PayrollRunResult result = new PayrollRunResult(key, prorateByAttendance, created, skipped,
+				List.copyOf(missingStructure));
 		// Counts rather than every record: each record has its own PAYROLL_RECORD_CREATED entry.
 		audit.record(AuditAction.PAYROLL_RUN, RUN_AUDIT_ENTITY, key, null, Map.of(
 				"month", key,
-				"prorateByAttendance", request.prorateByAttendance(),
+				"prorateByAttendance", prorateByAttendance,
 				"created", created,
 				"skipped", skipped,
 				"missingStructure", missingStructure));
-		return response;
+		return result;
 	}
 
 	/**
@@ -362,9 +373,47 @@ public class PayrollService {
 	 */
 	@Transactional
 	public PayrollRecordResponse pay(String id, PayRecordRequest request) {
-		PayrollRecord paid = markPaid(require(id), request.mode(), request.reference(),
-				requirePayableDate(request.paidOn()));
+		PayrollRecord paid = payRecord(id, request.mode(), request.reference(), request.paidOn());
 		return PayrollRecordResponse.of(paid, slipUrl(paid));
+	}
+
+	/**
+	 * The same, in this module's own types rather than the controller's request body.
+	 *
+	 * <p>For a caller in another module paying a whole month off record by record, each with its own
+	 * reference — B20's demonstration data seeder, whose references carry the month and the employee
+	 * id. {@code @Transactional} is repeated because the advance recovery and the record have to stand
+	 * or fall together, and a self-call from {@link #pay} would miss the proxy.
+	 *
+	 * @param paidOn the day the money left; null means today, and a date in the future is refused
+	 */
+	@Transactional
+	public PayrollRecord payRecord(String id, SalaryPaymentMode mode, String reference, LocalDate paidOn) {
+		return markPaid(require(id), mode, reference, requirePayableDate(paidOn));
+	}
+
+	/**
+	 * The PENDING records of one month, for a caller about to pay them.
+	 *
+	 * <p>No authorization check, and none is missing: it is not reachable from a request, and the
+	 * caller — B20's demonstration data seeder — is behind {@code DEMO_DATA_MANAGE}. Anything a person
+	 * reads goes through {@link #month(String)} or {@link #requireReadable(String)}.
+	 */
+	public List<PayrollRecord> pendingRecords(YearMonth month) {
+		return records.findByMonthOrderByEmployeeNameAsc(Months.format(month)).stream()
+				.filter(PayrollRecord::isPending)
+				.toList();
+	}
+
+	/**
+	 * Whether any salary has been computed for any month in this range, both ends inclusive.
+	 *
+	 * <p>The guard that stops the demonstration seeder running on top of a real payroll: a record is
+	 * what a slip is printed from, and a second run would not replace one — it would skip it and leave
+	 * the two data sets interleaved.
+	 */
+	public boolean anyRecordIn(YearMonth from, YearMonth to) {
+		return !records.findByMonthBetweenOrderByMonthAsc(Months.format(from), Months.format(to)).isEmpty();
 	}
 
 	/**

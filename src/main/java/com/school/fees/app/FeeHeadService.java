@@ -79,6 +79,23 @@ public class FeeHeadService {
 		return saved;
 	}
 
+	/**
+	 * The head with this name, creating it if the school has not got one.
+	 *
+	 * <p>For a bulk setup that needs a head to charge against and does not care whether this
+	 * deployment already has it — B20's demonstration data seeder. Matched on the trimmed name, which
+	 * is what {@link #create} makes unique, and a head that exists is returned <em>as it is</em>: one
+	 * that has been retired stays retired rather than being quietly switched back on, so the caller
+	 * finds out by being refused when it tries to charge it.
+	 */
+	public FeeHead findOrCreate(String name) {
+		String trimmed = name.trim();
+		return heads.findAllByOrderByNameAsc().stream()
+				.filter(head -> trimmed.equalsIgnoreCase(head.getName()))
+				.findFirst()
+				.orElseGet(() -> create(new FeeHeadRequest(trimmed, true)));
+	}
+
 	// --- for the other services in this module ----------------------------------------------------
 
 	/**

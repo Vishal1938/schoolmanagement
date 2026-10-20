@@ -49,21 +49,33 @@ public class SalaryAdvanceService {
 
 	/** Records money handed over, to be recovered from the next runs onwards. */
 	public SalaryAdvance give(AdvanceRequest request) {
-		EmployeeRef employee = employees.requireRef(request.employeeUniqueId());
+		return give(request.employeeUniqueId(), request.amount(), request.givenOn(), request.monthlyRecovery(),
+				request.reason());
+	}
+
+	/**
+	 * The same, in this module's own types rather than the controller's request body — for a caller in
+	 * another module, such as B20's demonstration data seeder.
+	 *
+	 * @param givenOn null means today; a date in the future is refused, as it is on the endpoint
+	 */
+	public SalaryAdvance give(String employeeUniqueId, long amount, LocalDate givenOn, long monthlyRecovery,
+			String reason) {
+		EmployeeRef employee = employees.requireRef(employeeUniqueId);
 		LocalDate today = LocalDate.now(clock);
-		LocalDate givenOn = request.givenOn() == null ? today : request.givenOn();
-		validate(request, givenOn, today);
+		LocalDate given = givenOn == null ? today : givenOn;
+		validate(amount, monthlyRecovery, given, today);
 
 		Instant now = Instant.now(clock);
 		SalaryAdvance saved = advances.insert(SalaryAdvance.builder()
 				.employeeUniqueId(employee.uniqueId())
 				.employeeName(employee.name())
-				.amount(request.amount())
-				.givenOn(givenOn)
-				.monthlyRecovery(request.monthlyRecovery())
+				.amount(amount)
+				.givenOn(given)
+				.monthlyRecovery(monthlyRecovery)
 				.recoveredSoFar(0L)
 				.status(AdvanceStatus.ACTIVE)
-				.reason(request.reason() == null || request.reason().isBlank() ? null : request.reason().trim())
+				.reason(reason == null || reason.isBlank() ? null : reason.trim())
 				.createdAt(now)
 				.updatedAt(now)
 				.build());
@@ -126,14 +138,14 @@ public class SalaryAdvanceService {
 
 	// --- validation -------------------------------------------------------------------------------
 
-	private void validate(AdvanceRequest request, LocalDate givenOn, LocalDate today) {
+	private void validate(long amount, long monthlyRecovery, LocalDate givenOn, LocalDate today) {
 		List<FieldViolation> violations = new ArrayList<>();
 		if (givenOn.isAfter(today)) {
 			violations.add(new FieldViolation("givenOn", "is in the future; an advance is recorded once given"));
 		}
-		if (request.monthlyRecovery() > request.amount()) {
+		if (monthlyRecovery > amount) {
 			violations.add(new FieldViolation("monthlyRecovery",
-					"is more than the advance itself (" + request.amount() + " paise)"));
+					"is more than the advance itself (" + amount + " paise)"));
 		}
 		if (!violations.isEmpty()) {
 			throw new ValidationException("The advance could not be recorded", violations);

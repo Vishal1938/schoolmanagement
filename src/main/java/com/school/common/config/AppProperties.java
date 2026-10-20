@@ -32,7 +32,8 @@ public record AppProperties(
 		@DefaultValue BootstrapAdmin bootstrapAdmin,
 		@DefaultValue Encryption encryption,
 		@DefaultValue Ai ai,
-		@DefaultValue Seed seed) {
+		@DefaultValue Seed seed,
+		@DefaultValue DemoData demoData) {
 
 	/** Feature switches. AI stays off unless explicitly enabled (B18). */
 	public record Features(@DefaultValue("false") boolean ai) {
@@ -121,6 +122,16 @@ public record AppProperties(
 		public boolean hasApiKey() {
 			return apiKey != null && !apiKey.isBlank();
 		}
+	}
+
+	/**
+	 * The demonstration data set (B20), from {@code DEMO_DATA_ENABLED}.
+	 *
+	 * <p>Off by default, and off is what a real deployment runs: with it off the endpoints under
+	 * {@code /admin/demo-data} do not exist at all, so there is nothing for an administrator to
+	 * invoke by accident on a school's live database.
+	 */
+	public record DemoData(@DefaultValue("false") boolean enabled) {
 	}
 
 	/**
