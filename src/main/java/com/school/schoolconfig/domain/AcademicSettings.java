@@ -14,6 +14,10 @@ import java.util.Set;
  * @param receiptFooter             text printed at the bottom of every receipt PDF
  * @param salarySlipFooter          text printed at the bottom of every salary slip PDF (B13)
  * @param reportCardFooter          text printed at the bottom of every report card PDF (B9)
+ * @param feeCycle                  how often the year's fees are collected. Null on a document
+ *                                  seeded before this field existed, which reads as
+ *                                  {@link FeeCycle#MONTHLY} — read it through
+ *                                  {@link #resolvedFeeCycle()}
  */
 public record AcademicSettings(
 		Set<DayOfWeek> workingDays,
@@ -21,5 +25,11 @@ public record AcademicSettings(
 		String receiptPrefix,
 		String receiptFooter,
 		String salarySlipFooter,
-		String reportCardFooter) {
+		String reportCardFooter,
+		FeeCycle feeCycle) {
+
+	/** The fee cycle, where a missing one means {@link FeeCycle#MONTHLY}. */
+	public FeeCycle resolvedFeeCycle() {
+		return feeCycle == null ? FeeCycle.MONTHLY : feeCycle;
+	}
 }

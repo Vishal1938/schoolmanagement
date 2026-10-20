@@ -29,19 +29,26 @@ import com.school.quiz.app.QuizzesOverview;
  * renders, with empty fee sections, so the administrator can reach the screen that fixes it rather
  * than meeting a 422 on login.
  *
- * @param asOf                 the school's today, in the deployment's own zone
- * @param studentAttendance    today's register tally. Absent when the student attendance module is off
- * @param todayCollection      money taken today, every mode together
- * @param feesSession          the active session's billing, every kind of charge together
- * @param feesThisMonth        the current month's MONTHLY installments, institution-wide: the footer
- *                             of {@code feesThisMonthByClass}
- * @param feesThisMonthByClass one row per class-section, in class order then section
- * @param pendingOneTimeFees   outstanding one-off charges, heaviest first
- * @param pendingSalaries      this month's computed-but-unpaid payroll
- * @param recentPayments       the last ten receipts, newest first
- * @param exams                absent when the exams module is off
- * @param notices              absent when the notices module is off
- * @param quizzes              absent when the quizzes module is off
+ * @param asOf                      the school's today, in the deployment's own zone
+ * @param studentAttendance         today's register tally. Absent when the student attendance module
+ *                                  is off
+ * @param todayCollection           money taken today, every mode together
+ * @param feesSession               the active session's billing, every kind of charge together
+ * @param feesCurrentPeriod         the stretch of the year being collected right now — a month or a
+ *                                  semester, per {@code academicSettings.feeCycle} and what the
+ *                                  invoices actually say — institution-wide: the footer of
+ *                                  {@code feesCurrentPeriodByClass}
+ * @param feesCurrentPeriodByClass  one row per class-section, in class order then section
+ * @param feesThisMonth             <strong>deprecated</strong>, the same figures as
+ *                                  {@code feesCurrentPeriod} under the old name. Kept for one release
+ * @param feesThisMonthByClass      <strong>deprecated</strong>, the same rows as
+ *                                  {@code feesCurrentPeriodByClass}. Kept for one release
+ * @param pendingOneTimeFees        outstanding one-off charges, heaviest first
+ * @param pendingSalaries           this month's computed-but-unpaid payroll
+ * @param recentPayments            the last ten receipts, newest first
+ * @param exams                     absent when the exams module is off
+ * @param notices                   absent when the notices module is off
+ * @param quizzes                   absent when the quizzes module is off
  */
 public record AdminDashboardResponse(
 		LocalDate asOf,
@@ -50,8 +57,10 @@ public record AdminDashboardResponse(
 		DayAttendance studentAttendance,
 		DayCollection todayCollection,
 		FeeDashboard.SessionTotals feesSession,
+		FeeDashboard.CurrentPeriod feesCurrentPeriod,
+		List<FeeDashboard.ClassPeriod> feesCurrentPeriodByClass,
 		FeeDashboard.MonthTotals feesThisMonth,
-		List<FeeDashboard.ClassMonth> feesThisMonthByClass,
+		List<FeeDashboard.ClassPeriod> feesThisMonthByClass,
 		List<FeeDashboard.PendingOneTime> pendingOneTimeFees,
 		PendingSalaries pendingSalaries,
 		List<PaymentSummary> recentPayments,

@@ -37,10 +37,16 @@ import org.springframework.stereotype.Service;
 @Service
 public class FeeRegisterService {
 
-	/** Months first, then one-off fees, each block oldest due date first. */
+	/**
+	 * The recurring installments first — months and semesters interleaved, oldest period first — then
+	 * the one-off fees by due date. The recurring block is ordered by the start of the period rather
+	 * than by the due date, because a semester falling due on 31 July and a month falling due on 10
+	 * August have to read in the order the school collects them, not in the order the dates happen to
+	 * fall.
+	 */
 	private static final Comparator<Installment> COLUMN_ORDER = Comparator
-			.comparingInt((Installment installment) -> installment.resolvedKind() == InstallmentKind.ONE_TIME ? 1 : 0)
-			.thenComparing(Installment::dueDate, Comparator.nullsLast(Comparator.naturalOrder()))
+			.comparingInt((Installment installment) -> installment.resolvedKind().isRecurring() ? 0 : 1)
+			.thenComparing(Installment::orderingDate, Comparator.nullsLast(Comparator.naturalOrder()))
 			.thenComparing(Installment::name);
 
 	private final InvoiceRepository invoices;
@@ -86,8 +92,17 @@ public class FeeRegisterService {
 						.toList();
 		List<FeeRegisterResponse.Column> columns = installments.stream()
 				.map(installment -> new FeeRegisterResponse.Column(installment.name(), installment.displayLabel(),
-						installment.resolvedKind(), installment.dueDate()))
+						installment.resolvedKind(), installment.dueDate(), installment.resolvedPeriodStart(),
+						installment.resolvedPeriodEnd()))
 				.toList();
+		// The column the office is collecting right now — whichever recurring one covers today, month or
+		// semester. Taken off the first match in display order, so two overlapping columns (which the
+		// setup endpoints refuse but a hand-written document could hold) resolve to the earlier one.
+		String currentPeriodKey = installments.stream()
+				.filter(installment -> installment.period() != null && installment.period().covers(today))
+				.map(Installment::name)
+				.findFirst()
+				.orElse(null);
 
 		List<StudentRef> roster = normalizedSection == null
 				? students.activeInClass(session, schoolClass.getId())
@@ -107,7 +122,7 @@ public class FeeRegisterService {
 		}
 
 		return new FeeRegisterResponse(session, schoolClass.getId(), schoolClass.getName(), normalizedSection,
-				columns, rows, footer(columns, columnTotals, chargeTotals));
+				columns, currentPeriodKey, rows, footer(columns, columnTotals, chargeTotals));
 	}
 
 	// --- rows -------------------------------------------------------------------------------------

@@ -12,9 +12,13 @@ import com.school.fees.domain.InvoiceStatus;
  * One invoice as the API returns it. All amounts are paise.
  *
  * @param label       what to show for it — the installment's label, or its name when there is none
- * @param kind        MONTHLY, ONE_TIME or CUSTOM; always present, since an invoice stored without one
- *                    is reported as the MONTHLY it is taken to be
+ * @param kind        MONTHLY, SEMESTER, ONE_TIME or CUSTOM; always present, since an invoice stored
+ *                    without one is reported as the MONTHLY it is taken to be
  * @param note        free text an admin typed when raising an individual charge; null otherwise
+ * @param periodStart first day of the session this covers, and {@code periodEnd} the last, inclusive.
+ *                    Both null for a one-off or individual charge, which covers no period. A MONTHLY
+ *                    invoice raised before this existed reports the calendar month of its due date
+ *                    rather than null
  * @param lateFineDue what the fine comes to <em>right now</em>, computed on read from the structure's
  *                    rule and never stored. 0 once the invoice is settled or cancelled, and always 0
  *                    for a CUSTOM charge, which belongs to no structure and so has no rule
@@ -32,6 +36,8 @@ public record InvoiceResponse(
 		InstallmentKind kind,
 		String note,
 		LocalDate dueDate,
+		LocalDate periodStart,
+		LocalDate periodEnd,
 		List<InvoiceItem> items,
 		long grossAmount,
 		long concessionAmount,
@@ -55,6 +61,8 @@ public record InvoiceResponse(
 				invoice.resolvedKind(),
 				invoice.getNote(),
 				invoice.getDueDate(),
+				invoice.resolvedPeriodStart(),
+				invoice.resolvedPeriodEnd(),
 				invoice.getItems() == null ? List.of() : invoice.getItems(),
 				invoice.grossAmount(),
 				invoice.getConcessionAmount(),

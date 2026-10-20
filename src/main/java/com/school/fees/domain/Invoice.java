@@ -85,6 +85,18 @@ public class Invoice {
 
 	private LocalDate dueDate;
 
+	/**
+	 * First day of the session this invoice's installment covers, snapshotted at generation.
+	 *
+	 * <p>Null on an invoice raised before this field existed and on one raised from a one-off or
+	 * individual charge, which covers no period. Read it through {@link #period()}, which backfills a
+	 * MONTHLY invoice's period from its due date.
+	 */
+	private LocalDate periodStart;
+
+	/** Last day covered, inclusive. Same rules as {@link #periodStart}. */
+	private LocalDate periodEnd;
+
 	/** The heads charged, with the name they had when it was charged. */
 	private List<InvoiceItem> items;
 
@@ -124,6 +136,47 @@ public class Invoice {
 	/** What to display: the label if one was snapshotted, otherwise the installment name. */
 	public String displayLabel() {
 		return label == null || label.isBlank() ? installmentName : label;
+	}
+
+	/**
+	 * The stretch of the session this invoice covers, or null when it covers none.
+	 *
+	 * <p>Backfilled exactly as {@link Installment#period()} is: a MONTHLY invoice with no stored period
+	 * — every one raised before B19 — covers the calendar month of its due date. A SEMESTER invoice
+	 * always carries its own, because a semester's period cannot be inferred from a date.
+	 */
+	public FeePeriod period() {
+		if (periodStart != null && periodEnd != null) {
+			return new FeePeriod(periodStart, periodEnd);
+		}
+		if (resolvedKind() == InstallmentKind.MONTHLY && dueDate != null) {
+			return FeePeriod.ofMonthContaining(dueDate);
+		}
+		return null;
+	}
+
+	/** First day covered, backfilled as {@link #period()} describes. */
+	public LocalDate resolvedPeriodStart() {
+		FeePeriod period = period();
+		return period == null ? null : period.start();
+	}
+
+	/** Last day covered, inclusive, backfilled as {@link #period()} describes. */
+	public LocalDate resolvedPeriodEnd() {
+		FeePeriod period = period();
+		return period == null ? null : period.end();
+	}
+
+	/**
+	 * A recurring invoice — MONTHLY or SEMESTER — whose period contains that date. This is the single
+	 * definition of "the installment covering today", shared by the dashboard and the register.
+	 */
+	public boolean coversRecurring(LocalDate date) {
+		if (!resolvedKind().isRecurring()) {
+			return false;
+		}
+		FeePeriod period = period();
+		return period != null && period.covers(date);
 	}
 
 	/** Nothing has been taken against this invoice, as fee or as fine — the test a charge must pass to be deleted. */

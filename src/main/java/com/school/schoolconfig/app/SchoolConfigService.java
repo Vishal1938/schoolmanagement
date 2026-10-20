@@ -18,6 +18,7 @@ import com.school.common.exceptions.ValidationException;
 import com.school.schoolconfig.api.SchoolConfigMapper;
 import com.school.schoolconfig.api.SchoolConfigRequest;
 import com.school.schoolconfig.domain.ContactDetails;
+import com.school.schoolconfig.domain.FeeCycle;
 import com.school.schoolconfig.domain.GradeBand;
 import com.school.schoolconfig.domain.GradingMode;
 import com.school.schoolconfig.domain.GradingScheme;
@@ -87,7 +88,10 @@ public class SchoolConfigService {
 				.identity(mapper.toIdentity(request.identity()))
 				.landing(mapper.toLanding(request.landing()))
 				.gradingScheme(mapper.toGradingScheme(request.gradingScheme()))
-				.academicSettings(mapper.toAcademicSettings(request.academicSettings()))
+				// feeCycle inside this is "not sent is not changed" too, for the same reason; the rest of
+				// the block is replaced wholesale. See SchoolConfigMapper#toAcademicSettings.
+				.academicSettings(mapper.toAcademicSettings(request.academicSettings(),
+						before.getAcademicSettings()))
 				.updatedAt(Instant.now(clock))
 				.build();
 		SchoolConfig saved = repository.save(updated);
@@ -118,7 +122,7 @@ public class SchoolConfigService {
 				.identity(mapper.toIdentity(seed.identity()))
 				.landing(mapper.toLanding(seed.landing()))
 				.gradingScheme(mapper.toGradingScheme(seed.gradingScheme()))
-				.academicSettings(mapper.toAcademicSettings(seed.academicSettings()))
+				.academicSettings(mapper.toAcademicSettings(seed.academicSettings(), null))
 				.createdAt(now)
 				.updatedAt(now)
 				.build();
@@ -153,6 +157,17 @@ public class SchoolConfigService {
 	/** Days attendance is expected on (B8). */
 	public Set<DayOfWeek> workingDays() {
 		return get().getAcademicSettings().workingDays();
+	}
+
+	/**
+	 * How often the year's fees are collected (B19), resolved — never null.
+	 *
+	 * <p>Read by the fees and dashboard modules to decide which period to head their figures with. It
+	 * gates nothing: the installments on a structure are the truth, and this only says what to suggest
+	 * and what to call the period a client is looking at.
+	 */
+	public FeeCycle feeCycle() {
+		return get().getAcademicSettings().resolvedFeeCycle();
 	}
 
 	/** School name, logo and colours, for PDF headers (B9, B12, B13). */

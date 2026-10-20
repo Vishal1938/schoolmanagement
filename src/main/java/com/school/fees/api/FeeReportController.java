@@ -40,15 +40,18 @@ public class FeeReportController {
 			description = "Defaults to the active session; pass classId for one class. balance includes the "
 					+ "late fine running right now. Ordered by the oldest unpaid due date, because the office "
 					+ "chases whoever has been behind longest, not whoever owes most. Narrow with kind "
-					+ "(MONTHLY, ONE_TIME or CUSTOM) and with month as `2026-10` — together they answer \"who "
-					+ "has not paid October's fees\". Every figure in a row counts only the invoices that got "
-					+ "through the filters, so a filtered balance is smaller than the student's real one.")
+					+ "(MONTHLY, SEMESTER, ONE_TIME or CUSTOM) and with installment — an installment's name or "
+					+ "label, `Semester 3` or `Oct 2026` — which together answer \"who has not paid Semester "
+					+ "3\". `month` as `2026-10` is the monthly-only predecessor of installment and is still "
+					+ "accepted. Every figure in a row counts only the invoices that got through the filters, "
+					+ "so a filtered balance is smaller than the student's real one.")
 	public List<DefaulterResponse> defaulters(
 			@RequestParam(required = false) String sessionId,
 			@RequestParam(required = false) String classId,
 			@RequestParam(required = false) InstallmentKind kind,
+			@RequestParam(required = false) String installment,
 			@RequestParam(required = false) String month) {
-		return reports.defaulters(sessionId, classId, kind, parsedMonth(month));
+		return reports.defaulters(sessionId, classId, kind, installment, parsedMonth(month));
 	}
 
 	/**

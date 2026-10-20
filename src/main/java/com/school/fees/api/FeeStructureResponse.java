@@ -14,9 +14,10 @@ import com.school.fees.domain.LateFineRule;
  * One fee structure, with head names resolved for display and every total pre-computed so the
  * frontend never adds money up itself.
  *
- * <p>Installments come back in the order the register reads them: the recurring months in date order
- * first, then the one-off charges in date order. The stored order is whatever each endpoint happened
- * to write in, which is not something a client should have to sort out.
+ * <p>Installments come back in the order the register reads them: the recurring ones — months and
+ * semesters together — in period order first, then the one-off charges by due date. The stored order
+ * is whatever each endpoint happened to write in, which is not something a client should have to sort
+ * out.
  *
  * <p>All amounts are paise.
  */
@@ -32,13 +33,16 @@ public record FeeStructureResponse(
 		Instant updatedAt) {
 
 	/**
-	 * @param kind  MONTHLY or ONE_TIME; always present, because an installment stored without one is
-	 *              reported as the MONTHLY it is taken to be
-	 * @param label what to head a column with — the name unless a different label was set
-	 * @param total the sum of the items for a section with no overrides
+	 * @param kind        MONTHLY, SEMESTER or ONE_TIME; always present, because an installment stored
+	 *                    without one is reported as the MONTHLY it is taken to be
+	 * @param label       what to head a column with — the name unless a different label was set
+	 * @param periodStart first day of the session this covers, {@code periodEnd} the last, inclusive.
+	 *                    Both null on a ONE_TIME fee, which covers no period; a MONTHLY one with none
+	 *                    stored reports the calendar month of its due date
+	 * @param total       the sum of the items for a section with no overrides
 	 */
-	public record Installment(String name, String label, InstallmentKind kind, LocalDate dueDate, List<Item> items,
-			long total) {
+	public record Installment(String name, String label, InstallmentKind kind, LocalDate dueDate,
+			LocalDate periodStart, LocalDate periodEnd, List<Item> items, long total) {
 	}
 
 	/**
@@ -48,13 +52,19 @@ public record FeeStructureResponse(
 	}
 
 	/**
-	 * Months first, then one-off charges, each block by due date. A null due date — which the stored
-	 * shape allows — sorts last rather than failing the comparison.
+	 * Recurring installments first — months and semesters interleaved in period order — then the
+	 * one-off charges by due date. A null date, which the stored shape allows, sorts last rather than
+	 * failing the comparison.
 	 */
 	private static final Comparator<Installment> REGISTER_ORDER = Comparator
-			.comparingInt((Installment installment) -> installment.kind() == InstallmentKind.ONE_TIME ? 1 : 0)
-			.thenComparing(Installment::dueDate, Comparator.nullsLast(Comparator.naturalOrder()))
+			.comparingInt((Installment installment) -> installment.kind().isRecurring() ? 0 : 1)
+			.thenComparing(FeeStructureResponse::orderingDateOf, Comparator.nullsLast(Comparator.naturalOrder()))
 			.thenComparing(Installment::name);
+
+	/** The start of the period if it covers one, otherwise the due date. */
+	private static LocalDate orderingDateOf(Installment installment) {
+		return installment.periodStart() == null ? installment.dueDate() : installment.periodStart();
+	}
 
 	/**
 	 * @param headNames head id to name; a head that has since vanished shows as null rather than
@@ -68,6 +78,8 @@ public record FeeStructureResponse(
 						installment.displayLabel(),
 						installment.resolvedKind(),
 						installment.dueDate(),
+						installment.resolvedPeriodStart(),
+						installment.resolvedPeriodEnd(),
 						installment.items() == null ? List.<Item>of() : installment.items().stream()
 								.map(item -> new Item(item.headId(), headNames.get(item.headId()), item.amount(),
 										item.sectionAmounts()))

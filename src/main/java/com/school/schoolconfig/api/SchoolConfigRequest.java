@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.school.schoolconfig.domain.FeeCycle;
 import com.school.schoolconfig.domain.GradingMode;
 import com.school.schoolconfig.domain.InstitutionType;
 import jakarta.validation.Valid;
@@ -170,6 +171,12 @@ public record SchoolConfigRequest(
 			@Size(max = 60) String remark) {
 	}
 
+	/**
+	 * {@code feeCycle} follows the same "not sent is not changed" rule as {@link Terms} and
+	 * {@link Modules}, and for the same reason: it was added after the admin screen existed, so a
+	 * client that does not know about it sends nothing and must not switch a college's semester plan
+	 * back to monthly. Nothing stored and nothing sent means MONTHLY.
+	 */
 	public record AcademicSettings(
 			@NotEmpty Set<DayOfWeek> workingDays,
 			@Min(0) @Max(720) int attendanceEditWindowHours,
@@ -177,6 +184,7 @@ public record SchoolConfigRequest(
 					message = "must be 2-12 upper-case letters, digits or hyphens") String receiptPrefix,
 			@Size(max = 500) String receiptFooter,
 			@Size(max = 500) String salarySlipFooter,
-			@Size(max = 500) String reportCardFooter) {
+			@Size(max = 500) String reportCardFooter,
+			FeeCycle feeCycle) {
 	}
 }

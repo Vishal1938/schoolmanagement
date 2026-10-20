@@ -94,6 +94,59 @@ public class FeeStructureController {
 				toResponses(List.of(result.structure())).getFirst());
 	}
 
+	@PostMapping("/semester")
+	@PreAuthorize(HasPermission.FEE_MANAGE)
+	@Operation(summary = "Set up a session's semester fees for one course",
+			description = "Writes one SEMESTER installment per entry, named \"Semester 3\" and labelled "
+					+ "\"Semester 3 (Jul-Dec 2026)\", into the structure for that session and course, creating "
+					+ "the structure if there is none and extending it if there is. Each semester carries its "
+					+ "own periodStart and periodEnd, which is the one thing a month does not need: a semester's "
+					+ "period cannot be worked out from its due date. Run it again to correct the figure — "
+					+ "semesters with no invoices yet are rewritten, ones that already have invoices are left "
+					+ "alone and reported in semestersSkipped. A duplicate semester number, or periods that "
+					+ "overlap each other or a semester already on the structure, is 400. sectionAmounts "
+					+ "overrides the amount per section. Amounts are paise. Nothing is billed here — run "
+					+ "generate-invoices afterwards.")
+	public SemesterFeeSetupResponse setUpSemesters(@Valid @RequestBody SemesterFeeSetupRequest request) {
+		FeeStructureService.SemesterPlanResult result = structures.setUpSemesters(request);
+		return new SemesterFeeSetupResponse(result.created(), result.updated(), result.skipped(),
+				toResponses(List.of(result.structure())).getFirst());
+	}
+
+	@GetMapping("/semester/suggest")
+	@PreAuthorize(HasPermission.FEE_MANAGE)
+	@Operation(summary = "Two prefilled semesters for a course",
+			description = "A suggestion to review, not a commitment: it reads only the course name and the "
+					+ "session's dates and writes nothing. The numbers come from a \"Year N\" in the course "
+					+ "name — Year 2 suggests semesters 3 and 4 — falling back to 1 and 2. The periods are "
+					+ "Jul 1 to Dec 31 and Jan 1 to Jun 30 of the session, falling due on Jul 31 and Jan 31. "
+					+ "Edit anything and POST it to /fees/structures/semester.")
+	public SemesterSuggestionResponse suggestSemesters(@RequestParam String classId,
+			@RequestParam(required = false) String sessionId) {
+		return structures.suggestSemesters(classId, sessionId);
+	}
+
+	@DeleteMapping("/{id}")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	@PreAuthorize(HasPermission.FEE_MANAGE)
+	@Operation(summary = "Delete a fee structure",
+			description = "Removes the structure and the invoices raised from it. Refused (422) if a single "
+					+ "rupee has been taken against any of them — a receipt has then been issued naming one of "
+					+ "its installments. Audited as FEE_STRUCTURE_DELETED with the counts.")
+	public void delete(@PathVariable String id) {
+		structures.delete(id);
+	}
+
+	@DeleteMapping("/{id}/installments/{name}")
+	@PreAuthorize(HasPermission.FEE_MANAGE)
+	@Operation(summary = "Remove one installment from a structure",
+			description = "Works on any kind — a month, a semester or a one-off fee — and removes the "
+					+ "invoices raised from it. Refused (422) if anything has been paid against any of them. "
+					+ "Returns the structure as it now stands. Audited as FEE_INSTALLMENT_DELETED.")
+	public FeeStructureResponse deleteInstallment(@PathVariable String id, @PathVariable String name) {
+		return toResponses(List.of(structures.deleteInstallment(id, name))).getFirst();
+	}
+
 	@PostMapping("/{id}/one-time-fees")
 	@ResponseStatus(HttpStatus.CREATED)
 	@PreAuthorize(HasPermission.FEE_MANAGE)

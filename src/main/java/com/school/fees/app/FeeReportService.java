@@ -61,23 +61,29 @@ public class FeeReportService {
 	 * <p>Ordered by the oldest unpaid due date rather than by the amount: the office chases the family
 	 * that has been behind longest, and a large bill that fell due yesterday is not yet a problem.
 	 *
-	 * @param sessionId defaults to the active session
-	 * @param classId   optional; omit for the whole school
-	 * @param kind      optional; only invoices of this kind count — MONTHLY to chase the fees alone,
-	 *                  CUSTOM to chase outstanding fines
-	 * @param month     optional; only invoices falling due in that month count, which is how "who has
-	 *                  not paid Oct 2026" is answered
+	 * @param sessionId   defaults to the active session
+	 * @param classId     optional; omit for the whole school
+	 * @param kind        optional; only invoices of this kind count — MONTHLY to chase the fees alone,
+	 *                    CUSTOM to chase outstanding fines
+	 * @param installment optional; only invoices of the installment named this count. Matched against
+	 *                    both the stored name and the display label, case-insensitively, so
+	 *                    {@code "Semester 3"} finds the semester whichever of the two the caller is
+	 *                    holding — which is how "who has not paid Semester 3" is answered
+	 * @param month       optional; only invoices falling due in that month count. The monthly-only
+	 *                    predecessor of {@code installment}, still accepted
 	 */
 	public List<DefaulterResponse> defaulters(String sessionId, String classId, InstallmentKind kind,
-			YearMonth month) {
+			String installment, YearMonth month) {
 		String session = hasText(sessionId) ? sessionId.trim() : academicContext.currentSessionId();
+		String wanted = hasText(installment) ? installment.trim() : null;
 		List<Invoice> owed = (hasText(classId)
 				? invoices.findBySessionIdAndClassIdAndStatusIn(session, classId.trim(), OWED)
 				: invoices.findBySessionIdAndStatusIn(session, OWED)).stream()
-				// Filtered in memory rather than in the query. Both filters are optional, a session's
+				// Filtered in memory rather than in the query. Every filter is optional, a session's
 				// unsettled invoices are already narrowed by an index, and a month is a range over a
 				// LocalDate that would need its own compound index to be worth pushing down.
 				.filter(invoice -> kind == null || invoice.resolvedKind() == kind)
+				.filter(invoice -> wanted == null || isInstallment(invoice, wanted))
 				.filter(invoice -> month == null || fallsDueIn(invoice, month))
 				.toList();
 		if (owed.isEmpty()) {
@@ -120,6 +126,19 @@ public class FeeReportService {
 						Comparator.nullsLast(Comparator.naturalOrder()))
 				.thenComparing(DefaulterResponse::balance, Comparator.reverseOrder()));
 		return rows;
+	}
+
+	/**
+	 * Whether this invoice belongs to the installment the caller named.
+	 *
+	 * <p>Either the stored name or the display label matches, case-insensitively. The two differ in
+	 * exactly the places it matters: a semester is <em>named</em> {@code "Semester 3"} and
+	 * <em>labelled</em> {@code "Semester 3 (Jul-Dec 2026)"}, and an office typing a filter will have
+	 * whichever of those its screen happened to show.
+	 */
+	private static boolean isInstallment(Invoice invoice, String wanted) {
+		return wanted.equalsIgnoreCase(invoice.getInstallmentName())
+				|| wanted.equalsIgnoreCase(invoice.displayLabel());
 	}
 
 	/** An invoice with no due date falls due in no month, so a month filter never picks it up. */
