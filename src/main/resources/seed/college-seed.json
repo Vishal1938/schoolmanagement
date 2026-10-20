@@ -75,6 +75,7 @@
     "receiptPrefix": "RCP",
     "receiptFooter": null,
     "salarySlipFooter": null,
-    "reportCardFooter": null
+    "reportCardFooter": null,
+    "feeCycle": "SEMESTER"
   }
 }

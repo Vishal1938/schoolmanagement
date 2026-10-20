@@ -191,6 +191,21 @@ public enum AuditAction {
 	FEE_STRUCTURE_UPDATED,
 
 	/**
+	 * A whole fee structure was deleted, together with its unpaid invoices. {@code before} is the
+	 * structure and {@code after} carries how many invoices went with it. Only ever possible while not
+	 * one rupee has been taken against any of them, which is why this is a deletion and not a
+	 * cancellation.
+	 */
+	FEE_STRUCTURE_DELETED,
+
+	/**
+	 * One installment — a month, a semester or a one-off fee — was removed from a structure, together
+	 * with the invoices raised from it. {@code before} is the installment and {@code after} carries the
+	 * count. Same rule as {@link #FEE_STRUCTURE_DELETED}: refused once anything has been paid.
+	 */
+	FEE_INSTALLMENT_DELETED,
+
+	/**
 	 * A course-wide one-off fee was removed from a structure, together with the invoices raised from
 	 * it. {@code before} is the installment and {@code after} carries how many invoices went with it —
 	 * the one place in fees where invoices are deleted rather than cancelled, so it is recorded on its

@@ -94,6 +94,9 @@ public class AdminDashboardService {
 				modules.isEnabled(SchoolModule.STUDENT_ATTENDANCE) ? attendance.day(today) : null,
 				collections.dayTotal(today),
 				feeFigures.session(),
+				feeFigures.currentPeriod(),
+				feeFigures.currentPeriodByClass(),
+				// The same two figures under the names the frontend already reads, for one release.
 				feeFigures.month(),
 				feeFigures.monthByClass(),
 				feeFigures.pendingOneTime(),

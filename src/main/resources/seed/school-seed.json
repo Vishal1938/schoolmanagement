@@ -167,6 +167,7 @@
     "receiptPrefix": "DVM-RCP",
     "receiptFooter": "This receipt is computer generated. Fees once paid are not refundable. For any correction, write to the accounts office within seven days quoting the receipt number.",
     "salarySlipFooter": "This salary slip is computer generated and does not require a signature. Raise any discrepancy with the accounts office within fifteen days of issue.",
-    "reportCardFooter": "This report card is issued by the school and is valid only with the signatures of the class teacher and the principal. Any discrepancy must be reported to the school office within fifteen days of issue."
+    "reportCardFooter": "This report card is issued by the school and is valid only with the signatures of the class teacher and the principal. Any discrepancy must be reported to the school office within fifteen days of issue.",
+    "feeCycle": "MONTHLY"
   }
 }

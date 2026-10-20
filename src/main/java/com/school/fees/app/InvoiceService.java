@@ -158,6 +158,10 @@ public class InvoiceService {
 					.kind(installment.resolvedKind())
 					.label(installment.displayLabel())
 					.dueDate(installment.dueDate())
+					// Snapshotted resolved, so a month written before periods existed is billed with the
+					// period it always implied rather than with nothing.
+					.periodStart(installment.resolvedPeriodStart())
+					.periodEnd(installment.resolvedPeriodEnd())
 					.items(items)
 					.concessionAmount(concessionAmount)
 					.netAmount(netAmount)

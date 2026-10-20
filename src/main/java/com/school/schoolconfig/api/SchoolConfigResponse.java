@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 
+import com.school.schoolconfig.domain.FeeCycle;
 import com.school.schoolconfig.domain.GradingMode;
 import com.school.schoolconfig.domain.InstitutionType;
 import com.school.schoolconfig.domain.Modules;
@@ -90,12 +91,14 @@ public record SchoolConfigResponse(
 	public record GradeBand(String grade, int minPercentage, int maxPercentage, String remark) {
 	}
 
+	/** {@code feeCycle} is returned resolved, so an omitted one reads as the MONTHLY it means. */
 	public record AcademicSettings(
 			Set<DayOfWeek> workingDays,
 			int attendanceEditWindowHours,
 			String receiptPrefix,
 			String receiptFooter,
 			String salarySlipFooter,
-			String reportCardFooter) {
+			String reportCardFooter,
+			FeeCycle feeCycle) {
 	}
 }

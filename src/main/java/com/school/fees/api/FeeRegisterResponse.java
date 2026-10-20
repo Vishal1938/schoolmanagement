@@ -20,9 +20,14 @@ import com.school.fees.domain.InstallmentKind;
  * sheet disagree. The fine is still charged — {@code POST /fees/register/mark-paid} and the student
  * ledger both include it, computed at the moment of payment — it simply is not a column.
  *
- * @param section null when the register covers every section of the class
- * @param columns the grid's columns in display order: the recurring months by due date, then the
- *                one-off fees by due date. {@code key} is what {@link Row#cells()} is keyed by
+ * @param section          null when the register covers every section of the class
+ * @param columns          the grid's columns in display order: the recurring installments — months and
+ *                         semesters together — in period order, then the one-off fees by due date.
+ *                         {@code key} is what {@link Row#cells()} is keyed by
+ * @param currentPeriodKey the key of the recurring column whose period contains today, so a sheet can
+ *                         scroll to or highlight the column the office is actually collecting. Null
+ *                         when no recurring column covers today — before the session opens, after it
+ *                         closes, or on a class with no structure yet
  */
 public record FeeRegisterResponse(
 		String sessionId,
@@ -30,14 +35,19 @@ public record FeeRegisterResponse(
 		String className,
 		String section,
 		List<Column> columns,
+		String currentPeriodKey,
 		List<Row> rows,
 		Footer footer) {
 
 	/**
-	 * @param key   the installment name, which is also the key into every row's {@code cells}
-	 * @param label what to print as the column heading
+	 * @param key         the installment name, which is also the key into every row's {@code cells}
+	 * @param label       what to print as the column heading
+	 * @param periodStart first day of the session this column covers, {@code periodEnd} the last,
+	 *                    inclusive. Both null on a {@code ONE_TIME} column, which covers no period; a
+	 *                    {@code MONTHLY} one with none stored reports the calendar month of its due date
 	 */
-	public record Column(String key, String label, InstallmentKind kind, LocalDate dueDate) {
+	public record Column(String key, String label, InstallmentKind kind, LocalDate dueDate,
+			LocalDate periodStart, LocalDate periodEnd) {
 	}
 
 	/**

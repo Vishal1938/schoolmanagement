@@ -37,16 +37,25 @@ public record FeeStructureRequest(
 	/**
 	 * Amounts are paise. Head ids must exist and must still be active.
 	 *
-	 * @param kind  omit for {@link InstallmentKind#MONTHLY}, which is what every installment written
-	 *              before this field existed is. {@code CUSTOM} is rejected: a charge for named
-	 *              students is not part of a structure — that is {@code POST /fees/charges}
-	 * @param label how to head the register column, when it differs from the name. Omit to use the name
+	 * @param kind        omit for {@link InstallmentKind#MONTHLY}, which is what every installment
+	 *                    written before this field existed is. {@code CUSTOM} is rejected: a charge for
+	 *                    named students is not part of a structure — that is {@code POST /fees/charges}
+	 * @param label       how to head the register column, when it differs from the name. Omit to use the
+	 *                    name
+	 * @param periodStart first day of the session this installment covers, {@code periodEnd} the last,
+	 *                    inclusive. <strong>Required together on a {@code SEMESTER}</strong>, whose
+	 *                    period cannot be inferred from a due date; optional on a {@code MONTHLY} one,
+	 *                    which falls back to the calendar month of its due date, and refused on a
+	 *                    {@code ONE_TIME} fee, which covers no period. Semesters are far easier to set
+	 *                    up through {@code POST /fees/structures/semester}, which derives the labels
 	 */
 	public record Installment(
 			@NotBlank @Size(max = 40) String name,
 			@NotNull LocalDate dueDate,
 			InstallmentKind kind,
 			@Size(max = 60) String label,
+			LocalDate periodStart,
+			LocalDate periodEnd,
 			@Valid @NotEmpty @Size(max = 40) List<Item> items) {
 	}
 

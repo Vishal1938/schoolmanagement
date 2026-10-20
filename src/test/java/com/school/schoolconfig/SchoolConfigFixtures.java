@@ -8,6 +8,7 @@ import java.util.Set;
 import com.school.schoolconfig.api.SchoolConfigMapper;
 import com.school.schoolconfig.api.SchoolConfigMapperImpl;
 import com.school.schoolconfig.api.SchoolConfigRequest;
+import com.school.schoolconfig.domain.FeeCycle;
 import com.school.schoolconfig.domain.GradingMode;
 import com.school.schoolconfig.domain.InstitutionType;
 import com.school.schoolconfig.domain.SchoolConfig;
@@ -54,7 +55,7 @@ public final class SchoolConfigFixtures {
 						Set.of(DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY,
 								DayOfWeek.FRIDAY, DayOfWeek.SATURDAY),
 						48, "TPS-RCP", "Computer generated receipt.", "Computer generated salary slip.",
-						"Computer generated report card."));
+						"Computer generated report card.", FeeCycle.MONTHLY));
 	}
 
 	/**
@@ -97,7 +98,7 @@ public final class SchoolConfigFixtures {
 				.identity(MAPPER.toIdentity(request.identity()))
 				.landing(MAPPER.toLanding(request.landing()))
 				.gradingScheme(MAPPER.toGradingScheme(request.gradingScheme()))
-				.academicSettings(MAPPER.toAcademicSettings(request.academicSettings()))
+				.academicSettings(MAPPER.toAcademicSettings(request.academicSettings(), null))
 				.createdAt(at)
 				.updatedAt(at)
 				.build();

@@ -271,6 +271,7 @@ The `Who` column gives access. "Self" means the user's own records only.
     "studentAttendance": true, "studentLogin": true, "onlinePayments": true,
     "landingPage": true, "ai": true
   },
+  "feeCycle": "MONTHLY",
   "tagline": "Learn with curiosity, lead with character",
   "logoUrl": "https://media.example/public/logo/....png",
   "faviconUrl": "https://media.example/public/favicon/....ico",
@@ -310,8 +311,8 @@ The `Who` column gives access. "Self" means the user's own records only.
 }
 ```
 
-**Only `name`, `institutionType`, `terms`, `modules`, `about`, `theme`, `stats`, `contact` and
-`features` are always present. Everything else is
+**Only `name`, `institutionType`, `terms`, `modules`, `feeCycle`, `about`, `theme`, `stats`, `contact`
+and `features` are always present. Everything else is
 optional and the key is omitted when the school has not filled it in** — including whole objects
 (`principal`, `academics`) and whole arrays (`highlights`, `facilities`, `galleryImageUrls`). Fields
 *inside* an optional object are independently optional too: a `principal` with only a `message` and no
@@ -327,6 +328,7 @@ content is missing, so render every section conditionally rather than assuming a
 | `terms.teacher` | A college sets `Faculty`; a school leaves `Teacher`. |
 | `modules` | Which optional modules are switched on. **Always present and complete**, every one defaulting to `true`. An endpoint behind a module that is off answers **404 `FEATURE_DISABLED`** — read this and hide the navigation entry rather than calling and handling the error. The paths each one covers are listed under §6. |
 | `modules.ai` | The **effective** value: it is `true` only when the institution has the module on *and* the deployment has `APP_FEATURES_AI=true`. It therefore always agrees with `features.ai`. |
+| `feeCycle` | `MONTHLY` or `SEMESTER`. **Always present**, defaulting to `MONTHLY`. How often this institution collects the year's fees, and the only field here taken from the otherwise entirely internal `academicSettings` — it is vocabulary rather than operation, deciding whether a fee screen is headed "October" or "Semester 3", and a client needs it before it is logged in. **It gates nothing**: a `SEMESTER` deployment can still carry monthly installments and the reverse, because the installments on a structure are the truth and this is only what to suggest and what to call a period. Use it to pick which setup wizard to offer, not to decide what the register may contain. |
 | `features` | Which optional features this deployment has. **Always present**, and the only object here that is not school content — it comes from the deployment's environment, not from `school_config`. Treat an unknown key inside it as absent-and-off. |
 | `features.ai` | `false` means every `/ai` and `/public/ai` endpoint answers 404 `FEATURE_DISABLED` in this deployment. Hide the AI entry points rather than calling them and handling the error. Kept for compatibility; it is the same value as `modules.ai`. |
 | `vision` | The school's vision statement. |
@@ -343,14 +345,22 @@ Note that public `academics` (marketing copy) and internal `academicSettings` (h
 are different things and only the first is public.
 
 When `modules.landingPage` is `false`, everything from `about` downwards — the whole marketing block,
-`contact` included — is **omitted**, and `name`, `institutionType`, `terms`, `modules`, `features`,
-`theme`, `logoUrl` and `faviconUrl` remain. The endpoint itself is never a 404: it is the only
+`contact` included — is **omitted**, and `name`, `institutionType`, `terms`, `modules`, `feeCycle`,
+`features`, `theme`, `logoUrl` and `faviconUrl` remain. The endpoint itself is never a 404: it is the only
 unauthenticated endpoint, so it is where a client learns what to put on the login screen and which
 navigation entries exist at all.
 
 `PUT /school/config` takes
 `{institutionType, terms, modules, identity, landing, gradingScheme, academicSettings}` — the same
 shape `GET /school/config` returns, minus the read-only `code` and `updatedAt`.
+
+`academicSettings` is
+`{workingDays, attendanceEditWindowHours, receiptPrefix, receiptFooter, salarySlipFooter,
+reportCardFooter, feeCycle}`. `feeCycle` is `MONTHLY` or `SEMESTER` and is the one field inside that
+block which is **not sent is not changed** — for the same reason `terms` and `modules` are, and
+nothing stored plus nothing sent means `MONTHLY`. `GET /school/config` returns it resolved. It decides
+which fee setup wizard to offer and how the dashboard heads its figures, and it gates nothing: see the
+note on `feeCycle` in the public projection above.
 
 The first three behave differently from the rest of this request: **what you do not send is not
 changed**, at both levels. Omitting `terms` entirely leaves the vocabulary alone; sending
@@ -1235,7 +1245,11 @@ Create, update and delete are written to `audit_logs`, with the deleted notice k
 | GET | `/fees/structures/{id}` | `FEE_MANAGE` (ADMIN) |
 | POST | `/fees/structures` | `FEE_MANAGE` (ADMIN) |
 | PUT | `/fees/structures/{id}` | `FEE_MANAGE` (ADMIN) |
+| DELETE | `/fees/structures/{id}` | `FEE_MANAGE` (ADMIN). Only while nothing has been paid |
 | POST | `/fees/structures/monthly` | `FEE_MANAGE` (ADMIN). A year of monthly fees in one call |
+| POST | `/fees/structures/semester` | `FEE_MANAGE` (ADMIN). A session's semester fees in one call |
+| GET | `/fees/structures/semester/suggest?classId=&sessionId=` | `FEE_MANAGE` (ADMIN). Two prefilled semesters |
+| DELETE | `/fees/structures/{id}/installments/{name}` | `FEE_MANAGE` (ADMIN). Any kind, only while unpaid |
 | POST | `/fees/structures/{id}/one-time-fees` | `FEE_MANAGE` (ADMIN). A course-wide one-off fee |
 | PUT | `/fees/structures/{id}/one-time-fees/{name}` | `FEE_MANAGE` (ADMIN) |
 | DELETE | `/fees/structures/{id}/one-time-fees/{name}` | `FEE_MANAGE` (ADMIN). Only while unpaid |
@@ -1251,12 +1265,19 @@ Create, update and delete are written to `audit_logs`, with the deleted notice k
 | POST | `/fees/register/mark-paid` | `FEE_MANAGE` (ADMIN). Settles the ticked cells in full |
 | POST | `/fees/offline-payment` | `FEE_MANAGE` (ADMIN). Cash, cheque, UPI or transfer taken at the counter |
 | GET | `/fees/reports/collection?from=&to=&kind=` | `FEE_MANAGE` (ADMIN) |
-| GET | `/fees/reports/defaulters?sessionId=&classId=&kind=&month=` | `FEE_MANAGE` (ADMIN) |
+| GET | `/fees/reports/defaulters?sessionId=&classId=&kind=&installment=&month=` | `FEE_MANAGE` (ADMIN) |
 
 **Every amount in this section is an integer of paise** — `150000` is ₹1,500.00. There are no decimals
 anywhere, in requests or responses (CLAUDE.md rule 3). Amounts a client sends are only ever *setup*
 figures (a structure's items, a concession's value); what a family owes is always computed on the
 server from the invoices.
+
+**Monthly and semester fees are the same thing collected at a different rhythm.** An installment's
+`kind` is `MONTHLY` or `SEMESTER` and the two are *recurring*: both carry a period of the session,
+both get a register column in date order, both accrue a late fine from their own due date, and both
+are paid, receipted, reported and conceded through exactly the same endpoints. Nothing branches on
+which one a deployment uses — `academicSettings.feeCycle` says which setup wizard to offer and how to
+head a period, and a structure may legitimately hold both while a college changes over.
 
 **Fee head.** `{id, name, active, createdAt, updatedAt}`; `POST`/`PUT` take `{name, active?}`.
 Names are unique → 409. `active` defaults to true on create and is left as-is when omitted on a
@@ -1273,6 +1294,7 @@ One structure says what **one class pays in one session**, split into installmen
   "classId": "66f0...",
   "installments": [
     { "name": "Q1", "dueDate": "2026-04-10", "kind": "MONTHLY", "label": null,
+      "periodStart": null, "periodEnd": null,
       "items": [ { "headId": "66f1...", "amount": 1200000, "sectionAmounts": { "B": 1100000 } },
                  { "headId": "66f2...", "amount": 300000 } ] }
   ],
@@ -1282,20 +1304,30 @@ One structure says what **one class pays in one session**, split into installmen
 
 → `{id, sessionId, classId, className, installments, lateFine, yearTotal, createdAt, updatedAt}`,
 where each installment comes back as
-`{name, label, kind, dueDate, items:[{headId, headName, amount, sectionAmounts}], total}`.
+`{name, label, kind, dueDate, periodStart, periodEnd, items:[{headId, headName, amount,
+sectionAmounts}], total}`.
 Totals are pre-computed so the frontend never adds money up itself. Installments come back in
-**register order** — the `MONTHLY` ones by due date, then the `ONE_TIME` ones by due date — whatever
-order they were written in.
+**register order** — the recurring ones (`MONTHLY` and `SEMESTER` together) by period, then the
+`ONE_TIME` ones by due date — whatever order they were written in.
 
 - `sessionId` is **not** in the body: a structure always belongs to the active session, the same
   stance as exams. 422 `UNPROCESSABLE` if no session is active. (`POST /fees/structures/monthly`
   below is the one exception and does take an optional `sessionId`.)
-- `kind` is `MONTHLY` or `ONE_TIME`, **defaulting to `MONTHLY`** — which is also what every
-  installment stored before this field existed reads as, so nothing about an existing deployment
+- `kind` is `MONTHLY`, `SEMESTER` or `ONE_TIME`, **defaulting to `MONTHLY`** — which is also what
+  every installment stored before this field existed reads as, so nothing about an existing deployment
   changes. `CUSTOM` is rejected here (400): a charge for named students is not part of a structure,
   and belongs to `POST /fees/charges`.
 - `label` is optional and is what to head a register column with when it differs from `name`. The
   response always carries a usable `label`, falling back to the name.
+- `periodStart` and `periodEnd` are the stretch of the session the installment covers, both ends
+  inclusive. **Required together on a `SEMESTER`** (400 otherwise) and refused on a `ONE_TIME` fee,
+  which covers no period. On a `MONTHLY` installment they are optional: left out, the period is the
+  **calendar month of the due date**, which is why every monthly plan written before this field
+  existed reads with a correct period and no migration was needed. The response always returns the
+  resolved pair, so a client never has to do that backfill itself. Two `SEMESTER` installments of one
+  structure may not overlap (400); months are not checked against each other, because a college moving
+  to semesters mid-session legitimately has a semester sitting on top of its months while the
+  changeover happens.
 - `items[].sectionAmounts` is optional: section name → the amount that section pays **instead of**
   `amount`, in paise. Every key must be a section the class actually has, or 400 `VALIDATION_ERROR`;
   keys are upper-cased to match how sections are stored. This is how Year 1 and Year 2 of one course
@@ -1313,6 +1345,19 @@ order they were written in.
 - Editing amounts or due dates does **not** rewrite invoices already generated — an invoice is a
   statement of what was charged. Editing `lateFine` **does** affect every invoice immediately,
   because the fine is read live rather than stored.
+- `DELETE /fees/structures/{id}` → **204**. Removes the structure and the invoices raised from it, and
+  is refused (422) if a single rupee has been taken against any one of them — a receipt has then been
+  issued naming one of its installments. Audited as `FEE_STRUCTURE_DELETED` with the counts.
+- `DELETE /fees/structures/{id}/installments/{name}` removes **one installment of any kind** — a
+  month, a semester or a one-off fee — and the invoices raised from it, under the same "nothing paid"
+  rule (422 otherwise), and returns the structure as it then stands. Audited as
+  `FEE_INSTALLMENT_DELETED`. The older `DELETE .../one-time-fees/{name}` still works and is the same
+  thing restricted to `ONE_TIME`.
+
+These two are the only places in fees where invoices are deleted rather than cancelled. The reason is
+the same in both: nothing points at a charge nobody has paid towards, and leaving two hundred
+cancelled rows behind would make every register harder to read for no gain. Once money has moved,
+cancel the invoices instead.
 
 #### Monthly fee setup
 `POST /fees/structures/monthly` writes a run of `MONTHLY` installments — one per month, named
@@ -1349,6 +1394,78 @@ structure in the shape above.
   by hand — are left alone.
 - **Nothing is billed here.** Run `generate-invoices` afterwards; it is idempotent and will raise
   exactly the months it has not raised yet.
+
+#### Semester fee setup
+`POST /fees/structures/semester` is the semester counterpart of the above: it writes `SEMESTER`
+installments — named `"Semester 3"`, labelled `"Semester 3 (Jul-Dec 2026)"` — into the structure for
+that session and course, **creating the structure if there is none and extending it if there is**. It
+is what a college sets its fees up with instead of twelve months.
+
+```json
+{
+  "sessionId": null,
+  "classId": "66f0...",
+  "headId": "66f1...",
+  "amount": 4500000,
+  "sectionAmounts": { "1": 4500000, "2": 4800000 },
+  "semesters": [
+    { "number": 3, "label": null, "periodStart": "2026-07-01", "periodEnd": "2026-12-31",
+      "dueDate": "2026-07-31" },
+    { "number": 4, "label": null, "periodStart": "2027-01-01", "periodEnd": "2027-06-30",
+      "dueDate": "2027-01-31" }
+  ]
+}
+```
+
+→ `{semestersCreated, semestersUpdated, semestersSkipped, structure}`, the same shape as the monthly
+response with the same meaning for each count.
+
+- **A semester states its own period**, which is the one way it differs from a month. `"Jul 2026"`
+  covers July because of what it is; `"Semester 3"` falling due on 31 July covers July to December and
+  nothing about the due date says so. `periodStart` and `periodEnd` are therefore required, both ends
+  inclusive.
+- `number` is the semester of the **whole programme**, not of the year: the second year of a degree is
+  semesters 3 and 4. It is what the installment is named after, so it is an identifier —
+  `"Semester 3"` is the name invoices refer back to and the idempotency key is built from.
+- `label` is optional and defaults to `"Semester {number} ({period})"`, where the period reads
+  `"Jul-Dec 2026"` within one calendar year and `"Oct 2026-Mar 2027"` across two. That is what a
+  register column heading and a receipt line show.
+- **Run it again to correct the figure**, exactly as for months: a semester the structure does not
+  have is added, one with no invoices yet takes the new amount, and one that already has invoices is
+  left untouched and reported in `semestersSkipped`. Only this `headId` is touched; other heads
+  already on those semesters are left alone.
+- 400 `VALIDATION_ERROR` on a **semester number listed twice** in one request, on `periodEnd` before
+  `periodStart`, and on **overlapping periods** — checked within the request *and* against the
+  semesters already on the structure, except for the ones this request is replacing. A day of the
+  session belongs to one semester, or "which installment covers today" stops having an answer.
+- `sessionId` is optional and defaults to the active session; a session id that does not exist is 404.
+- **Nothing is billed here.** Run `generate-invoices` afterwards.
+
+`GET /fees/structures/semester/suggest?classId=&sessionId=` returns two semesters filled in, ready to
+be reviewed, edited and posted back:
+
+```json
+{
+  "sessionId": "66ef...", "classId": "66f0...", "className": "B.Com Year 2",
+  "derivedFromCourseYear": 2,
+  "semesters": [
+    { "number": 3, "label": "Semester 3 (Jul-Dec 2026)", "periodStart": "2026-07-01",
+      "periodEnd": "2026-12-31", "dueDate": "2026-07-31" },
+    { "number": 4, "label": "Semester 4 (Jan-Jun 2027)", "periodStart": "2027-01-01",
+      "periodEnd": "2027-06-30", "dueDate": "2027-01-31" }
+  ]
+}
+```
+
+- **It is a suggestion and writes nothing**, reading only the course name and the session's dates.
+  Every field in it is meant to be edited before posting.
+- The **numbers come from the course name**: a `"Year N"` in it — `"Year 2"`, `"2nd Year"` — gives
+  `2N-1` and `2N`, so Year 2 suggests 3 and 4. A name with no year in it falls back to **1 and 2**,
+  and `derivedFromCourseYear` is then `null`, which is how a screen can say "we guessed" instead of
+  presenting the numbers as fact.
+- The **periods** are Jul 1 – Dec 31 and Jan 1 – Jun 30, built on the year the session opens in, with
+  due dates of **Jul 31 and Jan 31**. A college that runs January-to-June first changes the dates.
+- `sessionId` is optional and defaults to the active session.
 
 #### Course-wide one-off fees
 `POST /fees/structures/{id}/one-time-fees` adds a `ONE_TIME` installment — an admission fee, a
@@ -1425,16 +1542,23 @@ Returned by `/fees/students/{uniqueId}`, never created directly:
 { "id": "66f3...", "studentUniqueId": "DEMO-STU-26-00142", "classId": "66f0...",
   "sessionId": "66ef...", "structureId": "66f2...", "installmentName": "Q1",
   "label": "Q1", "kind": "MONTHLY", "note": null,
-  "dueDate": "2026-04-10", "items": [ { "headId": "66f1...", "headName": "Tuition", "amount": 1200000 } ],
+  "dueDate": "2026-04-10", "periodStart": "2026-04-01", "periodEnd": "2026-04-30",
+  "items": [ { "headId": "66f1...", "headName": "Tuition", "amount": 1200000 } ],
   "grossAmount": 1500000, "concessionAmount": 150000, "netAmount": 1350000,
   "paidAmount": 0, "lateFinePaid": 0, "lateFineDue": 14000, "balance": 1364000,
   "overdue": true, "status": "UNPAID" }
 ```
 
-- `kind` is `MONTHLY` | `ONE_TIME` | `CUSTOM` and is **always present**: an invoice stored before this
-  field existed is reported as the `MONTHLY` it is. `structureId` is `null` for a `CUSTOM` charge, and
-  only for one. `label` is what to print and is never null. `note` is only ever set on a `CUSTOM`
-  charge and is omitted otherwise.
+- `kind` is `MONTHLY` | `SEMESTER` | `ONE_TIME` | `CUSTOM` and is **always present**: an invoice
+  stored before this field existed is reported as the `MONTHLY` it is. `structureId` is `null` for a
+  `CUSTOM` charge, and only for one. `label` is what to print and is never null. `note` is only ever
+  set on a `CUSTOM` charge and is omitted otherwise.
+- `periodStart` and `periodEnd` are the stretch of the session this invoice covers, both ends
+  inclusive, **snapshotted from the installment** at generation like everything else on an invoice.
+  Both are omitted for a `ONE_TIME` or `CUSTOM` charge, which covers no period. A `MONTHLY` invoice
+  raised before this field existed reports the **calendar month of its due date** rather than nothing,
+  so no migration was needed and no client has to do that backfill. `SEMESTER` invoices always carry
+  the real dates, because a semester's period cannot be inferred from one.
 - `status` is `UNPAID` | `PARTIAL` | `PAID` | `CANCELLED`. An invoice whose `netAmount` is 0 — a full
   waiver — is raised as `PAID`. `CANCELLED` is how an invoice stops counting (a student who left,
   or one raised by mistake); it is still listed as history but is left out of every total and accrues
@@ -1448,7 +1572,10 @@ Returned by `/fees/students/{uniqueId}`, never created directly:
   from the day after that, `FLAT` charges `amount` once and `PER_DAY` charges `amount × days late`,
   capped at `cap` when `cap > 0` (`0` means uncapped). Whatever has already been collected as a fine
   (`lateFinePaid`) is taken off, and a settled or cancelled invoice accrues nothing. The rule is read
-  **live from the structure**, so correcting the grace days corrects every invoice at once.
+  **live from the structure**, so correcting the grace days corrects every invoice at once. This is
+  identical for a `SEMESTER` invoice: the fine runs from the semester's own `dueDate`, not from the
+  end of its period, and `PER_DAY` with no `cap` on a half-year installment is worth thinking about
+  before saving.
 - `overdue` is "past `dueDate` + `graceDays` with something still owed", independent of whether the
   school charges a fine at all.
 
@@ -1525,10 +1652,14 @@ session.
 {
   "sessionId": "66ef...", "classId": "66f0...", "className": "B.Com", "section": "1",
   "columns": [
-    { "key": "Jul 2026", "label": "Jul 2026", "kind": "MONTHLY", "dueDate": "2026-07-10" },
-    { "key": "Aug 2026", "label": "Aug 2026", "kind": "MONTHLY", "dueDate": "2026-08-10" },
-    { "key": "Admission fee", "label": "Admission fee", "kind": "ONE_TIME", "dueDate": "2026-07-10" }
+    { "key": "Jul 2026", "label": "Jul 2026", "kind": "MONTHLY", "dueDate": "2026-07-10",
+      "periodStart": "2026-07-01", "periodEnd": "2026-07-31" },
+    { "key": "Aug 2026", "label": "Aug 2026", "kind": "MONTHLY", "dueDate": "2026-08-10",
+      "periodStart": "2026-08-01", "periodEnd": "2026-08-31" },
+    { "key": "Admission fee", "label": "Admission fee", "kind": "ONE_TIME", "dueDate": "2026-07-10",
+      "periodStart": null, "periodEnd": null }
   ],
+  "currentPeriodKey": "Aug 2026",
   "rows": [
     { "uniqueId": "DEMO-STU-26-00142", "name": "Aarav Sharma", "rollNo": 7,
       "cells": {
@@ -1549,8 +1680,18 @@ session.
 }
 ```
 
-- **Columns are in display order**: the class's `MONTHLY` installments by due date, then its
-  `ONE_TIME` fees by due date. `key` is the installment name and is what `cells` is keyed by.
+- **Columns are in display order**: the class's **recurring** installments — `MONTHLY` and `SEMESTER`
+  together — by the start of their period, then its `ONE_TIME` fees by due date. `key` is the
+  installment name and is what `cells` is keyed by. The recurring block sorts on the period rather
+  than the due date so that a semester falling due on 31 July and a month falling due on 10 August
+  read in the order the school collects them.
+- `columns[].periodStart` / `periodEnd` are the stretch each column covers, both ends inclusive, and
+  are `null` only on a `ONE_TIME` column. A `MONTHLY` column with no stored period reports the
+  calendar month of its due date.
+- **`currentPeriodKey`** is the key of the recurring column whose period contains today — the column
+  the office is actually collecting — so a sheet can scroll to it or highlight it without working the
+  dates out. It is `null` when nothing covers today: before the session opens, after it closes, or on
+  a class with no structure yet. It is always one of `columns[].key` when it is not null.
 - **A column a student has no invoice for has no entry in `cells` at all.** That is a real state and
   not the same as unpaid — a student admitted in November has no July invoice — so render a blank
   cell rather than a zero.
@@ -1597,8 +1738,8 @@ every month and fee it covered.
   invoice as well as several, and leaves the invoice `PARTIAL`.
 
 #### Defaulters
-`GET /fees/reports/defaulters?sessionId=&classId=&kind=&month=` → an array, **not** paged. Defaults to
-the active session; omit `classId` for the whole school.
+`GET /fees/reports/defaulters?sessionId=&classId=&kind=&installment=&month=` → an array, **not** paged.
+Defaults to the active session; omit `classId` for the whole school.
 
 ```json
 [ { "studentUniqueId": "DEMO-STU-26-00142", "name": "Aarav Sharma", "classId": "66f0...",
@@ -1612,12 +1753,13 @@ balance first on a tie. Only `UNPAID` and `PARTIAL` invoices count. A student wh
 been removed is still listed, by id, with a null `name`: money owed does not stop being owed because
 the roll was edited.
 
-Both filters are optional and compose:
+All three filters are optional and compose:
 
 | Filter | Notes |
 |---|---|
-| `kind` | `MONTHLY`, `ONE_TIME` or `CUSTOM`. Chase the fees alone, or the admission fees, or the unpaid fines. |
-| `month` | `"2026-10"`. Only invoices **falling due in that month** count, which is how "who has not paid Oct 2026" is answered. An invoice with no due date is never picked up by a month filter. |
+| `kind` | `MONTHLY`, `SEMESTER`, `ONE_TIME` or `CUSTOM`. Chase the fees alone, or the admission fees, or the unpaid fines. |
+| `installment` | One installment's **name or label**, matched case-insensitively — `"Semester 3"`, `"Semester 3 (Jul-Dec 2026)"`, `"Oct 2026"`, `"Admission fee"`. This is how "who has not paid Semester 3" is answered, and it replaces `month` as the way to ask the question of any cycle. Both forms match because a semester is *named* `"Semester 3"` and *labelled* `"Semester 3 (Jul-Dec 2026)"`, and an office typing a filter has whichever its screen showed. |
+| `month` | `"2026-10"`. Only invoices **falling due in that month** count. The monthly-only predecessor of `installment` and **still accepted**; for a semester deployment it answers a question nobody is asking, so prefer `installment`. An invoice with no due date is never picked up by a month filter. |
 
 **Every figure in a row counts only the invoices that got through the filters**, so a filtered
 `balance` is smaller than that student's real one and `invoiceCount` smaller than their real count.
@@ -1765,8 +1907,9 @@ the current month to date. The range may not exceed 400 days, and `to` before `f
   days with no payments** rather than padding them with zeros.
 - Every figure is a sum of values stored on the payments when they were taken, never re-derived from
   invoices — so last month's report still says the same thing after somebody corrects a structure.
-- `kind` reports one sort of charge only: `MONTHLY` for the recurring fees, `ONE_TIME` for admission
-  fees and deposits, `CUSTOM` for individual charges and fines. **Every figure then counts only the
+- `kind` reports one sort of charge only: `MONTHLY` or `SEMESTER` for the recurring fees, whichever
+  this institution collects, `ONE_TIME` for admission fees and deposits, `CUSTOM` for individual
+  charges and fines. **Every figure then counts only the
   allocations of that kind**, a payment touching none of it is left out of `paymentCount` entirely,
   and `totalCollected` becomes exactly `principalCollected + lateFineCollected` — there is no
   unallocated remainder to attribute to a kind. The response echoes the filter back as `kind`, which
@@ -2120,11 +2263,22 @@ record a payment, come back, and `todayCollection` has moved.
     "markedStudents": 385, "percentage": 95.06
   },
   "todayCollection": { "date": "2026-10-19", "amount": 2450000, "count": 7 },
-  "feesSession":   { "totalDue": 184500000, "collected": 121300000, "pending": 63200000 },
+  "feesSession": { "totalDue": 184500000, "collected": 121300000, "pending": 63200000 },
+  "feesCurrentPeriod": {
+    "label": "Oct 2026", "start": "2026-10-01", "end": "2026-10-31",
+    "totalDue": 18450000, "collected": 12130000, "pending": 6320000
+  },
+  "feesCurrentPeriodByClass": [
+    {
+      "classId": "665f...", "className": "Class 1", "section": "A", "label": "Oct 2026",
+      "students": 34, "paidCount": 28, "unpaidCount": 5,
+      "collected": 1120000, "pending": 200000
+    }
+  ],
   "feesThisMonth": { "month": "2026-10", "totalDue": 18450000, "collected": 12130000, "pending": 6320000 },
   "feesThisMonthByClass": [
     {
-      "classId": "665f...", "className": "Class 1", "section": "A",
+      "classId": "665f...", "className": "Class 1", "section": "A", "label": "Oct 2026",
       "students": 34, "paidCount": 28, "unpaidCount": 5,
       "collected": 1120000, "pending": 200000
     }
@@ -2160,7 +2314,7 @@ record a payment, come back, and `todayCollection` has moved.
 | `quizzes` | `quizzes` |
 
 A module that is **on but has nothing in it yet** comes back as a section full of zeros, which is why
-absence and emptiness mean different things. `feesSession`, `feesThisMonth`, `todayCollection`,
+absence and emptiness mean different things. `feesSession`, `feesCurrentPeriod`, `todayCollection`,
 `pendingSalaries`, `recentPayments` and `counts` are always present: every deployment takes money and
 pays people.
 
@@ -2170,13 +2324,31 @@ able to reach the screen that creates a session.
 
 Notes on the figures:
 
-- **`feesThisMonthByClass`** is the current month's `MONTHLY` installments only, one row per
-  class-section, **sorted by class order then section**. Rows come from the roll, so a section nobody
-  has billed yet still appears with its student count and zeros — which is how you spot that October
-  was never generated. `paidCount + unpaidCount` **can be less than `students`**: a student not
-  billed this month is in neither count, because they have neither paid nor failed to.
-- **`feesSession`** covers the whole active session and every kind of charge — monthly, one-time and
-  custom — so it is not the sum of the twelve monthly figures.
+- **`feesCurrentPeriod`** is the stretch of the year being collected right now — a month for a school,
+  a semester for a college — and the institution-wide totals for it, so it is the footer of
+  `feesCurrentPeriodByClass`. `label` is what to head it with: the name every covering installment
+  agrees on (`"Oct 2026"`, `"Semester 3 (Jul-Dec 2026)"`), or a plain description of the window
+  (`"Jul-Dec 2026"`) when two courses covering the same months call them different semesters. There is
+  deliberately **no installment key** here for exactly that reason; the per-class rows carry the label
+  each class itself uses.
+- **How the period is chosen.** Each invoice is counted if it is *recurring* (`MONTHLY` or `SEMESTER`)
+  and its own `periodStart`–`periodEnd` contains today. That rule is per invoice, so a college running
+  some courses monthly and others by semester gets both counted correctly in one grid.
+  `academicSettings.feeCycle` only picks the **window to display when nothing has been billed yet** —
+  the calendar month, or the half of the year today falls in. It never excludes a figure, so a
+  deployment set to `MONTHLY` whose courses charge semesters still shows its money.
+- **`feesCurrentPeriodByClass`** is one row per class-section, **sorted by class order then section**.
+  Rows come from the roll, so a section nobody has billed yet still appears with its student count,
+  zeros and a `null` label — which is how you spot that October was never generated.
+  `paidCount + unpaidCount` **can be less than `students`**: a student not billed for this period is
+  in neither count, because they have neither paid nor failed to.
+- **`feesThisMonth` and `feesThisMonthByClass` are deprecated** and carry exactly the figures of the
+  two fields above, kept for one release. `feesThisMonth.month` is the calendar month containing
+  today whatever period the figures are actually for, so on a semester deployment the old field shows
+  the semester's money under a monthly heading — which is the better of the two wrong answers, the
+  other being zeros. Move to `feesCurrentPeriod`; these will be removed.
+- **`feesSession`** covers the whole active session and every kind of charge — monthly, semester,
+  one-time and custom — so it is not the sum of the period figures.
 - **`pendingOneTimeFees`** is one row per one-off charge per class, **heaviest first**, counted off
   the invoices rather than against the roll: a student who has left still owes what they owed.
   `CUSTOM` charges (one student's lost library book) are not here — the defaulters list carries those.

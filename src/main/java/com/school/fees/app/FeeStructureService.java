@@ -7,17 +7,21 @@ import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.school.academics.app.AcademicContext;
 import com.school.academics.app.AcademicSessionService;
 import com.school.academics.app.SchoolClassService;
+import com.school.academics.domain.AcademicSession;
 import com.school.academics.domain.SchoolClass;
 import com.school.common.audit.AuditAction;
 import com.school.common.audit.AuditService;
@@ -29,7 +33,10 @@ import com.school.common.exceptions.ValidationException;
 import com.school.fees.api.FeeStructureRequest;
 import com.school.fees.api.MonthlyFeeSetupRequest;
 import com.school.fees.api.OneTimeFeeRequest;
+import com.school.fees.api.SemesterFeeSetupRequest;
+import com.school.fees.api.SemesterSuggestionResponse;
 import com.school.fees.domain.FeeHead;
+import com.school.fees.domain.FeePeriod;
 import com.school.fees.domain.FeeStructure;
 import com.school.fees.domain.Installment;
 import com.school.fees.domain.InstallmentKind;
@@ -260,6 +267,228 @@ public class FeeStructureService {
 	public record MonthlyPlanResult(FeeStructure structure, int created, int updated, int skipped) {
 	}
 
+	// --- semester plans ---------------------------------------------------------------------------
+
+	/**
+	 * Writes {@code SEMESTER} installments into the structure for one session and course, creating the
+	 * structure if there is none and <strong>extending</strong> it if there is.
+	 *
+	 * <p>The three outcomes per semester are exactly {@link #setUpMonthly}'s, and for the same reasons:
+	 * a semester the structure does not have is added, one it has with no invoices takes this head's new
+	 * amount with every other head left alone, and one that already has invoices is skipped entirely
+	 * because an invoice states what a family was charged.
+	 *
+	 * <p>Two things are refused outright rather than reconciled. A semester <strong>number listed
+	 * twice</strong> in one request, because the number is what the installment is named after and the
+	 * second would silently overwrite the first. And <strong>overlapping periods</strong>, checked both
+	 * within the request and against the semesters already on the structure: a day of the session
+	 * belongs to one semester, and two semesters covering today would make "the installment covering
+	 * today" an ambiguous question on every dashboard and register that asks it.
+	 *
+	 * <p>Nothing is billed here. The invoices follow from the ordinary
+	 * {@code POST /fees/structures/{id}/generate-invoices}.
+	 */
+	public SemesterPlanResult setUpSemesters(SemesterFeeSetupRequest request) {
+		String sessionId = resolvedSessionId(request.sessionId());
+		SchoolClass schoolClass = validatedClass(request.classId());
+		FeeHead head = validatedActiveHead(request.headId());
+		List<FieldViolation> violations = new ArrayList<>();
+		Map<String, Long> overrides = validatedSectionAmounts(request.sectionAmounts(), schoolClass,
+				"sectionAmounts", violations);
+
+		FeeStructure before = structures.findBySessionIdAndClassId(sessionId, schoolClass.getId()).orElse(null);
+		List<SemesterFeeSetupRequest.Semester> requested = validatedSemesters(request, before, violations);
+		if (!violations.isEmpty()) {
+			throw new ValidationException("The semester fee plan could not be saved", violations);
+		}
+
+		Set<String> billed = before == null ? Set.of() : installmentNamesWithInvoices(before.getId());
+		Map<String, Installment> byName = new LinkedHashMap<>();
+		if (before != null) {
+			before.installmentsOrEmpty().forEach(installment -> byName.put(installment.name(), installment));
+		}
+
+		int created = 0;
+		int updated = 0;
+		int skipped = 0;
+		for (SemesterFeeSetupRequest.Semester semester : requested) {
+			String name = semesterName(semester.number());
+			String label = hasText(semester.label()) ? semester.label().trim() : semesterLabel(semester);
+			Installment existing = byName.get(name);
+			if (existing == null) {
+				byName.put(name, new Installment(name, semester.dueDate(),
+						List.of(new StructureItem(head.getId(), request.amount(), overrides)),
+						InstallmentKind.SEMESTER, label, semester.periodStart(), semester.periodEnd()));
+				created++;
+			}
+			else if (billed.contains(name)) {
+				skipped++;
+			}
+			else {
+				byName.put(name, withSemesterAmount(existing, head.getId(), request.amount(), overrides, label,
+						semester));
+				updated++;
+			}
+		}
+
+		List<Installment> installments = List.copyOf(byName.values());
+		Instant now = Instant.now(clock);
+		FeeStructure saved;
+		if (before == null) {
+			saved = insert(FeeStructure.builder()
+					.sessionId(sessionId)
+					.classId(schoolClass.getId())
+					.installments(installments)
+					.createdAt(now)
+					.updatedAt(now)
+					.build());
+			audit.record(AuditAction.FEE_STRUCTURE_CREATED, AUDIT_ENTITY, saved.getId(), null, saved);
+		}
+		else {
+			saved = structures.save(before.toBuilder().installments(installments).updatedAt(now).build());
+			audit.record(AuditAction.FEE_STRUCTURE_UPDATED, AUDIT_ENTITY, saved.getId(), before, saved);
+		}
+		return new SemesterPlanResult(saved, created, updated, skipped);
+	}
+
+	/** The structure after a semester plan was written, with what happened to each semester. */
+	public record SemesterPlanResult(FeeStructure structure, int created, int updated, int skipped) {
+	}
+
+	/**
+	 * Two semesters filled in for one course, for an office to review rather than type.
+	 *
+	 * <p>Reads nothing but the course name and the session's dates, and writes nothing at all. The
+	 * numbers come from a {@code "Year N"} in the course name — the second year of a programme is its
+	 * third and fourth semesters — falling back to 1 and 2 when the name says nothing. The periods are
+	 * the usual Indian split, July to December and January to June, with the fees falling due at the end
+	 * of each opening month.
+	 */
+	public SemesterSuggestionResponse suggestSemesters(String classId, String sessionId) {
+		SchoolClass schoolClass = validatedClass(classId);
+		AcademicSession session = resolvedSession(sessionId);
+		Integer courseYear = courseYearIn(schoolClass.getName());
+		int first = courseYear == null ? 1 : 2 * courseYear - 1;
+		// The year the session opens in, so a 2026-27 session suggests Jul-Dec 2026 and Jan-Jun 2027.
+		int openingYear = session.getStartDate() == null
+				? LocalDate.now(clock).getYear()
+				: session.getStartDate().getYear();
+
+		List<SemesterSuggestionResponse.Semester> semesters = List.of(
+				suggestion(first, LocalDate.of(openingYear, 7, 1), LocalDate.of(openingYear, 12, 31),
+						LocalDate.of(openingYear, 7, 31)),
+				suggestion(first + 1, LocalDate.of(openingYear + 1, 1, 1), LocalDate.of(openingYear + 1, 6, 30),
+						LocalDate.of(openingYear + 1, 1, 31)));
+		return new SemesterSuggestionResponse(session.getId(), schoolClass.getId(), schoolClass.getName(),
+				courseYear, semesters);
+	}
+
+	// --- semester internals -----------------------------------------------------------------------
+
+	/** {@code "Year 2"}, {@code "2nd Year"} or {@code "II Year"} is beyond us; only the first two count. */
+	private static final Pattern COURSE_YEAR = Pattern.compile(
+			"(?:year\\s*(\\d{1,2}))|(?:(\\d{1,2})\\s*(?:st|nd|rd|th)?\\s*year)", Pattern.CASE_INSENSITIVE);
+
+	/** How a semester installment is named: {@code "Semester 3"}. An identifier, so no period in it. */
+	private static String semesterName(int number) {
+		return "Semester " + number;
+	}
+
+	/** How it is displayed: {@code "Semester 3 (Jul-Dec 2026)"}. */
+	private static String semesterLabel(SemesterFeeSetupRequest.Semester semester) {
+		return semesterName(semester.number()) + " ("
+				+ new FeePeriod(semester.periodStart(), semester.periodEnd()).describe() + ")";
+	}
+
+	private static SemesterSuggestionResponse.Semester suggestion(int number, LocalDate start, LocalDate end,
+			LocalDate dueDate) {
+		return new SemesterSuggestionResponse.Semester(number,
+				semesterName(number) + " (" + new FeePeriod(start, end).describe() + ")", start, end, dueDate);
+	}
+
+	/** The year a course name claims to be, or null when it does not say. */
+	private static Integer courseYearIn(String className) {
+		if (className == null) {
+			return null;
+		}
+		Matcher matcher = COURSE_YEAR.matcher(className);
+		if (!matcher.find()) {
+			return null;
+		}
+		String digits = matcher.group(1) == null ? matcher.group(2) : matcher.group(1);
+		int year = Integer.parseInt(digits);
+		// A "Year 0" or a "Year 40" is somebody's room number, not a course year.
+		return year >= 1 && year <= 8 ? year : null;
+	}
+
+	/**
+	 * The requested semesters, with duplicate numbers and overlapping periods reported.
+	 *
+	 * <p>Overlaps are checked against the semesters already on the structure as well as within the
+	 * request, but a stored semester whose <em>number</em> the request also carries is left out of that
+	 * comparison: the request is replacing it, so it cannot overlap itself.
+	 */
+	private static List<SemesterFeeSetupRequest.Semester> validatedSemesters(SemesterFeeSetupRequest request,
+			FeeStructure before, List<FieldViolation> violations) {
+		List<SemesterFeeSetupRequest.Semester> requested = request.semesters();
+		Set<Integer> seenNumbers = new LinkedHashSet<>();
+		// A list rather than a map keyed by period: two semesters covering the *same* dates is the
+		// clearest overlap there is, and a map would quietly collapse them into one entry.
+		List<NamedPeriod> periods = new ArrayList<>();
+		List<SemesterFeeSetupRequest.Semester> result = new ArrayList<>();
+
+		for (int i = 0; i < requested.size(); i++) {
+			SemesterFeeSetupRequest.Semester semester = requested.get(i);
+			String field = "semesters[" + i + "]";
+			if (!seenNumbers.add(semester.number())) {
+				violations.add(new FieldViolation(field + ".number", "semester " + semester.number()
+						+ " is listed twice; one semester number is one installment"));
+				continue;
+			}
+			if (semester.periodEnd().isBefore(semester.periodStart())) {
+				violations.add(new FieldViolation(field + ".periodEnd", "must not be before periodStart"));
+				continue;
+			}
+			periods.add(new NamedPeriod(semesterName(semester.number()),
+					new FeePeriod(semester.periodStart(), semester.periodEnd())));
+			result.add(semester);
+		}
+
+		// The semesters already stored that this request is not replacing.
+		if (before != null) {
+			Set<String> replaced = result.stream().map(semester -> semesterName(semester.number()))
+					.collect(Collectors.toSet());
+			before.installmentsOrEmpty().stream()
+					.filter(installment -> installment.resolvedKind() == InstallmentKind.SEMESTER)
+					.filter(installment -> !replaced.contains(installment.name()))
+					.filter(installment -> installment.period() != null)
+					.forEach(installment -> periods.add(new NamedPeriod(installment.name(), installment.period())));
+		}
+
+		for (int i = 0; i < periods.size(); i++) {
+			for (int j = i + 1; j < periods.size(); j++) {
+				if (periods.get(i).period().overlaps(periods.get(j).period())) {
+					violations.add(new FieldViolation("semesters[].periodStart",
+							periods.get(i).name() + " and " + periods.get(j).name() + " cover overlapping "
+									+ "periods; a day of the session belongs to one semester"));
+				}
+			}
+		}
+		return result;
+	}
+
+	/** One period with the installment name to quote for it in a violation message. */
+	private record NamedPeriod(String name, FeePeriod period) {
+	}
+
+	/** The semester with this head's amount set, every other head kept, and the dates refreshed. */
+	private static Installment withSemesterAmount(Installment installment, String headId, long amount,
+			Map<String, Long> overrides, String label, SemesterFeeSetupRequest.Semester semester) {
+		return new Installment(installment.name(), semester.dueDate(),
+				itemsWithHeadAmount(installment, headId, amount, overrides),
+				InstallmentKind.SEMESTER, label, semester.periodStart(), semester.periodEnd());
+	}
+
 	// --- course-wide one-off fees -----------------------------------------------------------------
 
 	/**
@@ -343,6 +572,73 @@ public class FeeStructureService {
 		return saved;
 	}
 
+	// --- deleting ---------------------------------------------------------------------------------
+
+	/**
+	 * Removes a whole fee structure and the invoices raised from it.
+	 *
+	 * <p><strong>Only while nothing has been paid.</strong> One rupee taken against any one of its
+	 * invoices refuses the whole deletion, because a receipt has then been issued naming an installment
+	 * of this structure and a receipt has to keep pointing at something. The way to stop a structure
+	 * counting after that is to cancel its invoices, not to delete it.
+	 *
+	 * <p>Invoices are otherwise never deleted in this module — {@code CANCELLED} is how one stops
+	 * counting — and this is the same deliberate exception {@link #deleteOneTimeFee} is: a course set up
+	 * against the wrong class and billed the same afternoon has nothing worth keeping, and leaving two
+	 * hundred cancelled invoices behind would make every register harder to read for no gain.
+	 */
+	public void delete(String structureId) {
+		FeeStructure before = get(structureId);
+		List<Invoice> raised = invoices.findByStructureId(structureId);
+		requireNothingPaid(raised, "This fee structure");
+
+		invoices.deleteAll(raised);
+		structures.delete(before);
+		audit.record(AuditAction.FEE_STRUCTURE_DELETED, AUDIT_ENTITY, structureId, before,
+				Map.of("classId", before.getClassId(), "sessionId", before.getSessionId(),
+						"installments", before.installmentsOrEmpty().size(), "invoicesDeleted", raised.size()));
+	}
+
+	/**
+	 * Removes one installment — a month, a semester or a one-off fee — and the invoices raised from it.
+	 *
+	 * <p>The same rule as {@link #delete}, applied to one column instead of the sheet: refused once
+	 * anything has been taken against any of that installment's invoices. This is the general form of
+	 * {@link #deleteOneTimeFee}, which stays as it is for a client that already calls it; the difference
+	 * is only that this one does not insist the installment be a one-off fee, because a semester written
+	 * with the wrong dates has to be removable too.
+	 *
+	 * @return the structure as it now stands
+	 */
+	public FeeStructure deleteInstallment(String structureId, String installmentName) {
+		FeeStructure before = get(structureId);
+		Installment existing = before.installmentNamed(installmentName)
+				.orElseThrow(() -> new NotFoundException("This structure has no installment called \""
+						+ installmentName + "\""));
+		List<Invoice> raised = invoicesFor(before.getId(), existing.name());
+		requireNothingPaid(raised, "\"" + existing.name() + "\"");
+
+		List<Installment> installments = before.installmentsOrEmpty().stream()
+				.filter(installment -> !installment.name().equals(existing.name()))
+				.collect(Collectors.toCollection(ArrayList::new));
+		FeeStructure saved = saveInstallments(before, installments);
+		invoices.deleteAll(raised);
+		audit.record(AuditAction.FEE_INSTALLMENT_DELETED, AUDIT_ENTITY, structureId, existing,
+				Map.of("installmentName", existing.name(), "kind", existing.resolvedKind(),
+						"invoicesDeleted", raised.size()));
+		return saved;
+	}
+
+	/** Refuses the deletion if money has been taken against any of these invoices, naming how many. */
+	private static void requireNothingPaid(List<Invoice> raised, String what) {
+		List<Invoice> paid = raised.stream().filter(invoice -> !invoice.untouched()).toList();
+		if (!paid.isEmpty()) {
+			throw new BusinessRuleException(what + " cannot be deleted: " + paid.size() + " of its "
+					+ raised.size() + " invoices have had money taken against them, and a receipt has been "
+					+ "issued naming them. Cancel the invoices instead, or raise a concession.");
+		}
+	}
+
 	// --- plan internals ---------------------------------------------------------------------------
 
 	/** The session to write against: the one asked for, checked to exist, or the active one. */
@@ -355,6 +651,11 @@ public class FeeStructureService {
 		return sessions.get(sessionId.trim()).getId();
 	}
 
+	/** The same, as the whole session, for a caller that needs its dates as well as its id. */
+	private AcademicSession resolvedSession(String sessionId) {
+		return hasText(sessionId) ? sessions.get(sessionId.trim()) : academicContext.currentSession();
+	}
+
 	/** The named day of that month, or its last day when the month is shorter. */
 	private static LocalDate dueDateIn(YearMonth month, int dueDay) {
 		return month.atDay(Math.min(dueDay, month.lengthOfMonth()));
@@ -363,6 +664,19 @@ public class FeeStructureService {
 	/** The installment with this head's amount set, every other head kept, and the due date refreshed. */
 	private static Installment withHeadAmount(Installment installment, String headId, long amount,
 			Map<String, Long> overrides, LocalDate dueDate) {
+		return new Installment(installment.name(), dueDate,
+				itemsWithHeadAmount(installment, headId, amount, overrides),
+				InstallmentKind.MONTHLY, installment.label());
+	}
+
+	/**
+	 * This installment's items with one head's amount rewritten, or added if it was not charged yet.
+	 *
+	 * <p>Every other head is kept exactly as it was: the monthly and semester setup endpoints are each
+	 * about one head, and must not quietly drop the transport fee somebody added by hand.
+	 */
+	private static List<StructureItem> itemsWithHeadAmount(Installment installment, String headId, long amount,
+			Map<String, Long> overrides) {
 		List<StructureItem> items = new ArrayList<>();
 		boolean replaced = false;
 		for (StructureItem item : installment.items() == null ? List.<StructureItem>of() : installment.items()) {
@@ -377,7 +691,7 @@ public class FeeStructureService {
 		if (!replaced) {
 			items.add(new StructureItem(headId, amount, overrides));
 		}
-		return new Installment(installment.name(), dueDate, items, InstallmentKind.MONTHLY, installment.label());
+		return items;
 	}
 
 	/** Validates a one-off fee request against the structure's class and returns the installment to store. */
@@ -402,8 +716,10 @@ public class FeeStructureService {
 						+ "\""));
 		if (installment.resolvedKind() != InstallmentKind.ONE_TIME) {
 			throw new BusinessRuleException("\"" + installmentName + "\" is a " + installment.resolvedKind()
-					+ " installment, not a one-off fee. Monthly installments are managed through "
-					+ "POST /fees/structures/monthly or PUT /fees/structures/{id}.");
+					+ " installment, not a one-off fee. Recurring installments are managed through "
+					+ "POST /fees/structures/monthly, POST /fees/structures/semester or "
+					+ "PUT /fees/structures/{id}, and any of them can be removed with "
+					+ "DELETE /fees/structures/{id}/installments/{name}.");
 		}
 		return installment;
 	}
@@ -471,9 +787,12 @@ public class FeeStructureService {
 				// A CUSTOM charge is raised against named students and has no installment behind it, so
 				// putting one on a structure would bill the whole class for somebody's lost library book.
 				violations.add(new FieldViolation(field + ".kind",
-						"must be MONTHLY or ONE_TIME; a charge for named students is POST /fees/charges"));
+						"must be MONTHLY, SEMESTER or ONE_TIME; a charge for named students is "
+								+ "POST /fees/charges"));
 				continue;
 			}
+			InstallmentKind kind = installment.kind() == null ? InstallmentKind.MONTHLY : installment.kind();
+			FeePeriod period = validatedPeriod(installment, kind, field, violations);
 			Set<String> seenHeads = new LinkedHashSet<>();
 			List<StructureItem> items = new ArrayList<>();
 			for (int j = 0; j < installment.items().size(); j++) {
@@ -489,15 +808,79 @@ public class FeeStructureService {
 					items.add(new StructureItem(item.headId(), item.amount(), overrides));
 				}
 			}
-			result.add(new Installment(name, installment.dueDate(), items,
-					installment.kind() == null ? InstallmentKind.MONTHLY : installment.kind(),
-					trimToNull(installment.label())));
+			result.add(new Installment(name, installment.dueDate(), items, kind, trimToNull(installment.label()),
+					period == null ? null : period.start(), period == null ? null : period.end()));
 		}
 
+		requireNoOverlappingSemesters(result, violations);
 		if (!violations.isEmpty()) {
 			throw new ValidationException("The fee structure could not be saved", violations);
 		}
 		return result;
+	}
+
+	/**
+	 * The period on one requested installment, checked against its kind.
+	 *
+	 * <p>A SEMESTER must state both dates: its period is the one thing that cannot be derived, and a
+	 * semester without one would be invisible to every "which installment covers today" question. A
+	 * MONTHLY one may state them and otherwise falls back to the month of its due date. A ONE_TIME fee
+	 * covers no period at all, so dates on one are refused rather than stored and ignored.
+	 *
+	 * @return null when the installment carries no explicit period
+	 */
+	private static FeePeriod validatedPeriod(FeeStructureRequest.Installment requested, InstallmentKind kind,
+			String field, List<FieldViolation> violations) {
+		LocalDate start = requested.periodStart();
+		LocalDate end = requested.periodEnd();
+		if (start == null && end == null) {
+			if (kind == InstallmentKind.SEMESTER) {
+				violations.add(new FieldViolation(field + ".periodStart",
+						"a SEMESTER installment must state periodStart and periodEnd; unlike a month, its "
+								+ "period cannot be worked out from the due date"));
+			}
+			return null;
+		}
+		if (start == null || end == null) {
+			violations.add(new FieldViolation(field + (start == null ? ".periodStart" : ".periodEnd"),
+					"periodStart and periodEnd have to be given together"));
+			return null;
+		}
+		if (kind == InstallmentKind.ONE_TIME) {
+			violations.add(new FieldViolation(field + ".periodStart",
+					"a ONE_TIME fee covers no period, so it must not carry one"));
+			return null;
+		}
+		if (end.isBefore(start)) {
+			violations.add(new FieldViolation(field + ".periodEnd", "must not be before periodStart"));
+			return null;
+		}
+		return new FeePeriod(start, end);
+	}
+
+	/**
+	 * No two semesters of one structure may share a day.
+	 *
+	 * <p>Only the semesters are checked. Months cannot overlap by construction, and a structure that
+	 * mixes the two — a college moving to semesters mid-session — necessarily has a semester sitting on
+	 * top of its months, which is a real state while the changeover happens rather than a mistake.
+	 */
+	private static void requireNoOverlappingSemesters(List<Installment> installments,
+			List<FieldViolation> violations) {
+		List<Installment> semesters = installments.stream()
+				.filter(installment -> installment.resolvedKind() == InstallmentKind.SEMESTER)
+				.filter(installment -> installment.period() != null)
+				.sorted(Comparator.comparing(Installment::resolvedPeriodStart))
+				.toList();
+		for (int i = 1; i < semesters.size(); i++) {
+			Installment earlier = semesters.get(i - 1);
+			Installment later = semesters.get(i);
+			if (earlier.period().overlaps(later.period())) {
+				violations.add(new FieldViolation("installments[].periodStart",
+						"\"" + earlier.name() + "\" and \"" + later.name() + "\" cover overlapping periods; "
+								+ "a day of the session belongs to one semester"));
+			}
+		}
 	}
 
 	/**

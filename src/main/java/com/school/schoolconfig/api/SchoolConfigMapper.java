@@ -1,6 +1,7 @@
 package com.school.schoolconfig.api;
 
 import com.school.schoolconfig.domain.AcademicSettings;
+import com.school.schoolconfig.domain.FeeCycle;
 import com.school.schoolconfig.domain.GradingScheme;
 import com.school.schoolconfig.domain.Identity;
 import com.school.schoolconfig.domain.Landing;
@@ -63,8 +64,39 @@ public interface SchoolConfigMapper {
 	@Mapping(target = "institutionType", expression = "java(config.resolvedInstitutionType())")
 	@Mapping(target = "terms", expression = "java(config.resolvedTerms())")
 	@Mapping(target = "modules", source = "modules")
+	@Mapping(target = "feeCycle", expression = "java(feeCycleOf(config))")
 	PublicSchoolResponse toPublicResponse(SchoolConfig config, PublicSchoolResponse.Features features,
 			Modules modules);
+
+	/**
+	 * The fee cycle in force, for the public projection. Null-safe at both levels: a configuration
+	 * document written before this field existed collects monthly, and so does one with no
+	 * {@code academicSettings} at all.
+	 */
+	default FeeCycle feeCycleOf(SchoolConfig config) {
+		AcademicSettings settings = config.getAcademicSettings();
+		return settings == null ? FeeCycle.MONTHLY : settings.resolvedFeeCycle();
+	}
+
+	/**
+	 * The admin projection of the academic settings, with {@code feeCycle} <strong>resolved</strong> so
+	 * that a document seeded before the field existed renders as the MONTHLY it means rather than as a
+	 * null the admin screen has to interpret. Written by hand for that one reason; MapStruct would copy
+	 * the raw field.
+	 */
+	default SchoolConfigResponse.AcademicSettings toAcademicSettingsResponse(AcademicSettings settings) {
+		if (settings == null) {
+			return null;
+		}
+		return new SchoolConfigResponse.AcademicSettings(
+				settings.workingDays(),
+				settings.attendanceEditWindowHours(),
+				settings.receiptPrefix(),
+				settings.receiptFooter(),
+				settings.salarySlipFooter(),
+				settings.reportCardFooter(),
+				settings.resolvedFeeCycle());
+	}
 
 	// --- request -> document parts ---------------------------------------------------------------
 
@@ -74,7 +106,27 @@ public interface SchoolConfigMapper {
 
 	GradingScheme toGradingScheme(SchoolConfigRequest.GradingScheme gradingScheme);
 
-	AcademicSettings toAcademicSettings(SchoolConfigRequest.AcademicSettings academicSettings);
+	/**
+	 * The academic settings to store, given what was asked for and what is there now.
+	 *
+	 * <p>Everything but {@code feeCycle} is a wholesale replacement, as the rest of this request is.
+	 * {@code feeCycle} alone is "not sent is not changed", under the same rule as {@link #toTerms} and
+	 * {@link #toModules} and for the same reason: an admin screen that predates the field sends nothing,
+	 * and that must not switch a college's semester plan back to monthly. Nothing stored and nothing
+	 * sent means {@link FeeCycle#MONTHLY}.
+	 */
+	default AcademicSettings toAcademicSettings(SchoolConfigRequest.AcademicSettings requested,
+			AcademicSettings current) {
+		FeeCycle base = current == null ? FeeCycle.MONTHLY : current.resolvedFeeCycle();
+		return new AcademicSettings(
+				requested.workingDays(),
+				requested.attendanceEditWindowHours(),
+				requested.receiptPrefix(),
+				requested.receiptFooter(),
+				requested.salarySlipFooter(),
+				requested.reportCardFooter(),
+				requested.feeCycle() == null ? base : requested.feeCycle());
+	}
 
 	/**
 	 * The vocabulary to store, given what was asked for and what is there now.

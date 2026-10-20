@@ -3,6 +3,7 @@ package com.school.schoolconfig.api;
 import java.util.List;
 import java.util.Set;
 
+import com.school.schoolconfig.domain.FeeCycle;
 import com.school.schoolconfig.domain.InstitutionType;
 import com.school.schoolconfig.domain.Modules;
 import com.school.schoolconfig.domain.Terms;
@@ -18,10 +19,16 @@ import com.school.schoolconfig.domain.Terms;
  * <p>Never add here: the receipt prefix, the attendance edit window, working days, the grading
  * scheme, PDF footer text, the school code or any audit field.
  *
+ * <p>{@code feeCycle} is the one field taken from {@code academicSettings}, which is otherwise
+ * entirely internal. It is here because it is vocabulary rather than operation — it decides whether a
+ * fee screen is headed "October" or "Semester 3" — and a client has to know it before it is logged in
+ * enough to read the configuration. It reveals nothing: how often a school collects its fees is on its
+ * prospectus.
+ *
  * <p>{@link Features} is the one member that is not configuration content; see its own note.
  *
- * <p>Only {@code name}, {@code institutionType}, {@code terms}, {@code modules} and {@code features}
- * are certain to be present. Everything else is optional in the configuration, so a landing page must
+ * <p>Only {@code name}, {@code institutionType}, {@code terms}, {@code modules}, {@code feeCycle} and
+ * {@code features} are certain to be present. Everything else is optional in the configuration, so a landing page must
  * treat every field as possibly absent; the response omits nulls rather than sending them.
  *
  * <p><strong>When the {@code landingPage} module is off</strong>, every field from {@code about}
@@ -35,6 +42,7 @@ public record PublicSchoolResponse(
 		InstitutionType institutionType,
 		Terms terms,
 		Modules modules,
+		FeeCycle feeCycle,
 		String tagline,
 		String logoUrl,
 		String faviconUrl,
@@ -54,9 +62,9 @@ public record PublicSchoolResponse(
 
 	/** The complete set of top-level keys this response may ever serialise. */
 	public static final Set<String> FIELDS = Set.of(
-			"name", "institutionType", "terms", "modules", "tagline", "logoUrl", "faviconUrl", "theme",
-			"about", "vision", "principal", "academics", "highlights", "facilities", "galleryImageUrls",
-			"stats", "contact", "mapEmbedUrl", "socialLinks", "features");
+			"name", "institutionType", "terms", "modules", "feeCycle", "tagline", "logoUrl", "faviconUrl",
+			"theme", "about", "vision", "principal", "academics", "highlights", "facilities",
+			"galleryImageUrls", "stats", "contact", "mapEmbedUrl", "socialLinks", "features");
 
 	/**
 	 * Which optional features this deployment has, so the frontend can decide what to render before
