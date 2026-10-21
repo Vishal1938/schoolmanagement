@@ -72,6 +72,11 @@ app:
   api-base-path: /api/v1
   school-code: ${SCHOOL_CODE:DEMO}
   timezone: ${APP_TIMEZONE:Asia/Kolkata}
+  # The origin this API is reached on from outside — scheme and host only, no path, no trailing
+  # slash: https://school.example, never https://school.example/api/v1. Set it on every deployment
+  # behind a proxy. Empty means the OpenAPI document guesses from the incoming request, which is
+  # right locally and wrong anywhere a host answers both http and https — see OpenApiConfig.
+  public-base-url: ${APP_PUBLIC_BASE_URL:}
   features:
     ai: ${APP_FEATURES_AI:false}
   jwt:
@@ -147,6 +152,11 @@ springdoc:
     path: /swagger-ui.html
     operations-sorter: alpha
     tags-sorter: alpha
+  cache:
+    # The document is cheap to build and is asked for a handful of times a day, and caching it means
+    # whichever scheme and host the first caller after a restart used is baked in for everybody —
+    # which is exactly the failure app.public-base-url exists to prevent, surviving a redeploy.
+    disabled: true
 
 logging:
   level:
