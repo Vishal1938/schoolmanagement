@@ -47,6 +47,18 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
+  # Honour the X-Forwarded-* headers the hosting proxy sets, which every deployment of this has in
+  # front of it (Railway, Nginx). Two things break without it, both because the application believes
+  # it is being reached on plain http at its internal address:
+  #   - the OpenAPI document advertises `http://host` as its server, so Swagger UI — loaded over
+  #     https — cannot call it at all and every Try-it-out ends in "Failed to fetch";
+  #   - getRemoteAddr() is the proxy, so the whole internet shares one rate-limit bucket in
+  #     ChatRateLimiter.
+  # `framework` is Spring's own ForwardedHeaderFilter rather than Tomcat's valve, so it behaves the
+  # same whatever container this runs in. It is a no-op locally, where nothing sends the headers.
+  # Set it to `none` only if this is ever exposed without a proxy in front: the headers are then the
+  # client's to forge.
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:framework}
   error:
     whitelabel:
       enabled: false
