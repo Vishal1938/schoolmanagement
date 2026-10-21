@@ -15,9 +15,15 @@ import org.springframework.validation.annotation.Validated;
  * variables listed in CLAUDE.md. Nothing school-specific is ever hardcoded: what is not an
  * environment variable lives in the {@code school_config} collection instead.
  *
- * @param apiBasePath prefix added to every controller in {@code com.school}; actuator and the
- *                    OpenAPI endpoints stay outside it
- * @param schoolCode  short code of the school this deployment serves
+ * @param apiBasePath   prefix added to every controller in {@code com.school}; actuator and the
+ *                      OpenAPI endpoints stay outside it
+ * @param schoolCode    short code of the school this deployment serves
+ * @param publicBaseUrl the <strong>origin</strong> this API is reached on from outside — scheme, host
+ *                      and port only, never a path. Optional, and only read by {@code OpenApiConfig}:
+ *                      set it on any deployment behind a proxy, and the OpenAPI document advertises
+ *                      it instead of guessing from the incoming request. Guessing is what makes
+ *                      Swagger UI's Try-it-out fail with a CORS error on a host that answers both
+ *                      http and https — see {@link #resolvedPublicBaseUrl()}
  */
 @Validated
 @ConfigurationProperties(prefix = "app")
@@ -25,6 +31,7 @@ public record AppProperties(
 		@DefaultValue("/api/v1") @NotBlank String apiBasePath,
 		@NotBlank String schoolCode,
 		@DefaultValue("Asia/Kolkata") @NotBlank String timezone,
+		String publicBaseUrl,
 		@DefaultValue Features features,
 		@DefaultValue Jwt jwt,
 		@DefaultValue Storage storage,
@@ -34,6 +41,23 @@ public record AppProperties(
 		@DefaultValue Ai ai,
 		@DefaultValue Seed seed,
 		@DefaultValue DemoData demoData) {
+
+	/**
+	 * {@link #publicBaseUrl} without a trailing slash, or null when it is not configured.
+	 *
+	 * <p>Must be an origin and nothing more — {@code https://school.example}, not
+	 * {@code https://school.example/api/v1}. Every path in the OpenAPI document already starts with
+	 * {@link #apiBasePath}, so a base URL carrying it too would have generated clients calling
+	 * {@code /api/v1/api/v1/...}. A trailing slash would do the same thing one character at a time,
+	 * hence the trim here rather than a note in a README.
+	 */
+	public String resolvedPublicBaseUrl() {
+		if (publicBaseUrl == null || publicBaseUrl.isBlank()) {
+			return null;
+		}
+		String trimmed = publicBaseUrl.trim();
+		return trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
+	}
 
 	/** Feature switches. AI stays off unless explicitly enabled (B18). */
 	public record Features(@DefaultValue("false") boolean ai) {
