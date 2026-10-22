@@ -100,7 +100,7 @@ public class FeeReportService {
 		// One accumulator per student, in the order their first invoice came back.
 		Map<String, Tally> byStudent = new LinkedHashMap<>();
 		for (Invoice invoice : owed) {
-			long lateFine = LateFine.dueOn(invoice, rules.get(invoice.getStructureId()), today);
+			long lateFine = LateFine.dueOn(invoice, LateFine.ruleFor(invoice, rules), today);
 			byStudent.computeIfAbsent(invoice.getStudentUniqueId(), uniqueId -> new Tally())
 					.add(invoice, lateFine);
 		}

@@ -2,7 +2,9 @@ package com.school.fees.app;
 
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.Map;
 
+import com.school.fees.domain.InstallmentKind;
 import com.school.fees.domain.Invoice;
 import com.school.fees.domain.LateFineRule;
 import com.school.fees.domain.LateFineType;
@@ -17,13 +19,46 @@ import com.school.fees.domain.LateFineType;
 public final class LateFine {
 
 	/**
+	 * This invoice's late-fine rule out of a map keyed by structure id — <strong>the only safe way to
+	 * read one</strong>.
+	 *
+	 * <p>A {@link InstallmentKind#CUSTOM} charge has <em>no</em> {@code structureId}: it is raised
+	 * against one student and belongs to no structure, so there is no rule to read and it carries no
+	 * late fine. Looking that null up directly is what used to throw: the map comes from
+	 * {@link FeeStructureService#lateFineRulesOf}, which returned {@code Map.of()} when none of the
+	 * invoices had a structure, and {@code Map.of().get(null)} is a NullPointerException rather than
+	 * null. A ledger holding nothing but individual charges — a library fine on its own — therefore
+	 * crashed every quote, every allocation and every status read. Call this instead of
+	 * {@code rules.get(invoice.getStructureId())}.
+	 *
+	 * @return the rule, or null when this invoice has no structure or its structure charges nothing
+	 * @throws IllegalStateException if an invoice that <em>should</em> have a structure has none. That
+	 *                               is a corrupt document rather than a missing feature, and saying
+	 *                               which invoice is the only way anybody can go and look at it
+	 */
+	public static LateFineRule ruleFor(Invoice invoice, Map<String, LateFineRule> rules) {
+		String structureId = invoice.getStructureId();
+		if (structureId == null) {
+			if (invoice.resolvedKind() != InstallmentKind.CUSTOM) {
+				throw new IllegalStateException("Invoice " + invoice.getId() + " ("
+						+ invoice.displayLabel() + " for " + invoice.getStudentUniqueId() + ") is a "
+						+ invoice.resolvedKind() + " charge with no structureId. Only a CUSTOM charge may "
+						+ "have none, so this document is incomplete and its late fine cannot be worked out.");
+			}
+			return null;
+		}
+		return rules == null ? null : rules.get(structureId);
+	}
+
+	/**
 	 * The fine still owed on this invoice, in paise.
 	 *
 	 * <p>Nothing is charged while anything of the principal is still within the grace period, nothing
 	 * is charged once the invoice is settled or cancelled, and whatever has already been collected as
 	 * a fine is taken off.
 	 *
-	 * @param rule  the structure's rule, or null when the school charges nothing for being late
+	 * @param rule  the structure's rule, or null when the school charges nothing for being late.
+	 *              Obtain it with {@link #ruleFor}, never with a direct map lookup
 	 * @param today the date to charge as of, which comes from the injected {@code Clock}
 	 */
 	public static long dueOn(Invoice invoice, LateFineRule rule, LocalDate today) {

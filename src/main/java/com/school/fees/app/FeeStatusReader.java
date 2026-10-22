@@ -92,7 +92,7 @@ public class FeeStatusReader {
 			}
 			billed += invoice.getNetAmount();
 			paid += invoice.getPaidAmount();
-			overdue = overdue || LateFine.isOverdue(invoice, rules.get(invoice.getStructureId()), today);
+			overdue = overdue || LateFine.isOverdue(invoice, LateFine.ruleFor(invoice, rules), today);
 		}
 		if (billed - paid <= 0L) {
 			return FeeStatus.PAID;

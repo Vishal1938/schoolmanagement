@@ -105,12 +105,20 @@ public class FeeStructureService {
 		return structures.findById(id).orElseThrow(() -> NotFoundException.of("Fee structure", id));
 	}
 
-	/** Structure id to its late-fine rule, for a set of invoices, in one read. Null values are kept out. */
+	/**
+	 * Structure id to its late-fine rule, for a set of invoices, in one read. Null values are kept out.
+	 *
+	 * <p><strong>Never {@code Map.of()}</strong>, even when there is nothing to return. Callers look a
+	 * rule up by {@code invoice.getStructureId()}, which is legitimately null for a CUSTOM charge, and
+	 * {@code Map.of().get(null)} throws a NullPointerException where a {@link LinkedHashMap} answers
+	 * null. An empty immutable map here meant a ledger of nothing but individual charges crashed every
+	 * quote. Read it through {@link LateFine#ruleFor} and this cannot bite either way.
+	 */
 	public Map<String, LateFineRule> lateFineRulesOf(Collection<String> structureIds) {
-		if (structureIds == null || structureIds.isEmpty()) {
-			return Map.of();
-		}
 		Map<String, LateFineRule> rules = new LinkedHashMap<>();
+		if (structureIds == null || structureIds.isEmpty()) {
+			return rules;
+		}
 		structures.findAllByIdIn(structureIds).forEach(structure -> {
 			if (structure.getLateFine() != null) {
 				rules.put(structure.getId(), structure.getLateFine());
