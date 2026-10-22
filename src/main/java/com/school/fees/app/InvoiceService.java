@@ -216,7 +216,7 @@ public class InvoiceService {
 		long totalPaid = 0L;
 		long totalLateFineDue = 0L;
 		for (Invoice invoice : ledger) {
-			LateFineRule rule = rules.get(invoice.getStructureId());
+			LateFineRule rule = LateFine.ruleFor(invoice, rules);
 			long lateFineDue = LateFine.dueOn(invoice, rule, today);
 			rows.add(InvoiceResponse.of(invoice, lateFineDue, LateFine.isOverdue(invoice, rule, today)));
 			if (invoice.getStatus() == InvoiceStatus.CANCELLED) {
@@ -418,7 +418,7 @@ public class InvoiceService {
 		Map<String, LateFineRule> rules = structures.lateFineRulesOf(FeeStatusReader.structureIdsOf(selected));
 		return selected.stream()
 				.mapToLong(invoice -> invoice.outstanding()
-						+ LateFine.dueOn(invoice, rules.get(invoice.getStructureId()), asOf))
+						+ LateFine.dueOn(invoice, LateFine.ruleFor(invoice, rules), asOf))
 				.sum();
 	}
 
@@ -489,7 +489,7 @@ public class InvoiceService {
 			if (remaining <= 0L) {
 				break;
 			}
-			long fineDue = LateFine.dueOn(before, rules.get(before.getStructureId()), asOf);
+			long fineDue = LateFine.dueOn(before, LateFine.ruleFor(before, rules), asOf);
 			long fine = Math.min(remaining, fineDue);
 			remaining -= fine;
 			long principal = Math.min(remaining, before.outstanding());
