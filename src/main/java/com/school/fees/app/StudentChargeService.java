@@ -4,8 +4,10 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import com.school.academics.app.AcademicContext;
@@ -96,10 +98,15 @@ public class StudentChargeService {
 		String note = trimToNull(request.note());
 		Instant now = Instant.now(clock);
 
+		// Read before the first write: the suffix has to be settled up front, because a duplicate-key
+		// error would abort this transaction rather than letting us try the next name. See insert().
+		Map<String, Set<String>> taken = takenNamesFor(roster);
+
 		List<StudentChargeResponse.Charge> charges = new ArrayList<>(roster.size());
 		for (StudentRef student : roster) {
 			InvoiceItem item = new InvoiceItem(head.getId(), head.getName(), request.amount());
-			Invoice saved = insert(student, sessionId, label, item, request.dueDate(), note, now);
+			Invoice saved = insert(student, sessionId, label, item, request.dueDate(), note, now,
+					taken.get(student.uniqueId()));
 			audit.record(AuditAction.FEE_CHARGE_CREATED, AUDIT_ENTITY, saved.getId(), null, saved);
 			charges.add(new StudentChargeResponse.Charge(saved.getId(), student.uniqueId(), student.name(),
 					saved.getInstallmentName(), saved.displayLabel(), saved.getNetAmount()));
@@ -123,7 +130,7 @@ public class StudentChargeService {
 		String label = name.trim();
 		Invoice saved = insert(student, academicContext.currentSessionId(), label,
 				new InvoiceItem(head.getId(), head.getName(), amount), dueDate, trimToNull(note),
-				Instant.now(clock));
+				Instant.now(clock), takenNamesFor(List.of(student)).get(student.uniqueId()));
 		audit.record(AuditAction.FEE_CHARGE_CREATED, AUDIT_ENTITY, saved.getId(), null, saved);
 		return saved;
 	}
@@ -163,43 +170,88 @@ public class StudentChargeService {
 	 * name. A second "Late library fine" in March is a perfectly normal thing to happen, so the stored
 	 * name becomes {@code "Late library fine (2)"} while the {@code label} stays what was typed — the
 	 * family sees the same words on both bills, and the index still does its job.
+	 *
+	 * <p><strong>The free name is chosen by reading, not by colliding.</strong> This used to insert
+	 * optimistically and catch {@link DuplicateKeyException} to try the next suffix, which is invalid
+	 * inside a transaction: MongoDB aborts the whole transaction on a duplicate-key write error, so the
+	 * retry's insert came back as error 251 {@code NoSuchTransaction} and the caller saw a
+	 * {@code TransientClientSessionException} instead of a second charge. Every method here is
+	 * {@code @Transactional}, so the name has to be settled before the first write.
+	 *
+	 * @param taken the installment names this student already holds, from {@link #takenNamesFor}
+	 * @throws org.springframework.dao.DuplicateKeyException if another request takes the chosen name
+	 *                                                       between the read and this write. Not caught:
+	 *                                                       the transaction is genuinely dead at that
+	 *                                                       point and the whole call has to be retried
 	 */
 	private Invoice insert(StudentRef student, String sessionId, String label, InvoiceItem item,
-			LocalDate dueDate, String note, Instant now) {
+			LocalDate dueDate, String note, Instant now, Set<String> taken) {
+		return invoices.insert(Invoice.builder()
+				.studentUniqueId(student.uniqueId())
+				.classId(student.classId())
+				.sessionId(sessionId)
+				.structureId(null)
+				.installmentName(freeName(student, label, taken))
+				.kind(InstallmentKind.CUSTOM)
+				.label(label)
+				.note(note)
+				.dueDate(dueDate)
+				.items(List.of(item))
+				.concessionAmount(0L)
+				.netAmount(item.amount())
+				.paidAmount(0L)
+				.lateFinePaid(0L)
+				// A zero-amount charge is settled the moment it exists, the same rule generation
+				// uses for a full waiver: an UNPAID invoice for nothing is a row every report has
+				// to explain away.
+				.status(item.amount() <= 0L ? InvoiceStatus.PAID : InvoiceStatus.UNPAID)
+				.createdAt(now)
+				.updatedAt(now)
+				.build());
+	}
+
+	/**
+	 * The first unused form of {@code label} for this student — the label itself, then {@code "label
+	 * (2)"}, {@code "label (3)"} and so on.
+	 *
+	 * <p>Adds the name it picks to {@code taken}, so raising two charges of the same name against one
+	 * student inside a single call still gets two distinct names without re-reading.
+	 */
+	private static String freeName(StudentRef student, String label, Set<String> taken) {
 		for (int attempt = 1; attempt <= MAX_NAME_ATTEMPTS; attempt++) {
 			String name = attempt == 1 ? label : label + " (" + attempt + ")";
-			try {
-				return invoices.insert(Invoice.builder()
-						.studentUniqueId(student.uniqueId())
-						.classId(student.classId())
-						.sessionId(sessionId)
-						.structureId(null)
-						.installmentName(name)
-						.kind(InstallmentKind.CUSTOM)
-						.label(label)
-						.note(note)
-						.dueDate(dueDate)
-						.items(List.of(item))
-						.concessionAmount(0L)
-						.netAmount(item.amount())
-						.paidAmount(0L)
-						.lateFinePaid(0L)
-						// A zero-amount charge is settled the moment it exists, the same rule generation
-						// uses for a full waiver: an UNPAID invoice for nothing is a row every report has
-						// to explain away.
-						.status(item.amount() <= 0L ? InvoiceStatus.PAID : InvoiceStatus.UNPAID)
-						.createdAt(now)
-						.updatedAt(now)
-						.build());
-			}
-			catch (DuplicateKeyException ex) {
-				if (attempt == MAX_NAME_ATTEMPTS) {
-					throw new BusinessRuleException(student.name() + " already has " + MAX_NAME_ATTEMPTS
-							+ " charges called \"" + label + "\". Give this one a more specific name.");
-				}
+			if (taken.add(name)) {
+				return name;
 			}
 		}
-		throw new IllegalStateException("unreachable");
+		throw new BusinessRuleException(student.name() + " already has " + MAX_NAME_ATTEMPTS
+				+ " charges called \"" + label + "\". Give this one a more specific name.");
+	}
+
+	/**
+	 * The CUSTOM charge names each of these students already holds, in one read.
+	 *
+	 * <p>One query for the whole roster rather than one per student, so raising a trip fee for forty
+	 * children costs a single extra round trip. Only charges count: an invoice raised from a structure
+	 * has a {@code structureId}, so it sits in a different corner of the unique index and can never
+	 * collide with a charge's name.
+	 */
+	private Map<String, Set<String>> takenNamesFor(List<StudentRef> roster) {
+		Map<String, Set<String>> taken = new HashMap<>();
+		roster.forEach(student -> taken.put(student.uniqueId(), new HashSet<>()));
+		if (roster.isEmpty()) {
+			return taken;
+		}
+		invoices.findByStudentUniqueIdIn(taken.keySet()).forEach(invoice -> {
+			if (invoice.getStructureId() != null || invoice.getInstallmentName() == null) {
+				return;
+			}
+			Set<String> names = taken.get(invoice.getStudentUniqueId());
+			if (names != null) {
+				names.add(invoice.getInstallmentName());
+			}
+		});
+		return taken;
 	}
 
 	/** Every id resolved to a student, with all the unknown ones reported at once. */
