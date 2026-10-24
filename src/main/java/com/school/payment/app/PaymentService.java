@@ -31,6 +31,7 @@ import com.school.payment.infra.PaymentRepository;
 import com.school.people.app.StudentRef;
 import com.school.people.app.StudentService;
 import com.school.schoolconfig.app.SchoolConfigService;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -60,11 +61,12 @@ public class PaymentService {
 	private final IdGenerator idGenerator;
 	private final AppProperties properties;
 	private final AuditService audit;
+	private final ApplicationEventPublisher events;
 	private final Clock clock;
 
 	public PaymentService(PaymentRepository payments, InvoiceService invoices, StudentService students,
 			SchoolConfigService schoolConfig, IdGenerator idGenerator, AppProperties properties, AuditService audit,
-			Clock clock) {
+			ApplicationEventPublisher events, Clock clock) {
 		this.payments = payments;
 		this.invoices = invoices;
 		this.students = students;
@@ -72,6 +74,7 @@ public class PaymentService {
 		this.idGenerator = idGenerator;
 		this.properties = properties;
 		this.audit = audit;
+		this.events = events;
 		this.clock = clock;
 	}
 
@@ -127,7 +130,22 @@ public class PaymentService {
 				.build());
 
 		audit.record(AuditAction.PAYMENT_RECORDED, AUDIT_ENTITY, saved.getId(), null, saved);
+		publishCaptured(saved);
 		return saved;
+	}
+
+	/**
+	 * Announces that money was received, for whoever books it — the accounts module (B21).
+	 *
+	 * <p>Package-private, because {@link PaymentSettlement} publishes the same event for a gateway
+	 * capture and the two must not drift. The listeners are {@code AFTER_COMMIT}, so a failure to book
+	 * the entry can never roll back the payment itself; what fixes a missed one is
+	 * {@code POST /accounts/backfill}, not a failed receipt.
+	 */
+	void publishCaptured(Payment payment) {
+		events.publishEvent(new PaymentCapturedEvent(payment.getId(), payment.getReceiptNo(),
+				payment.getStudentUniqueId(), payment.getPayerName(), payment.getAmount(), payment.getMode(),
+				payment.getPaidAt()));
 	}
 
 	/**
@@ -263,6 +281,18 @@ public class PaymentService {
 	 * <p>No caller check — it returns amounts, so the endpoint that calls it is behind
 	 * {@code DASHBOARD_ADMIN}, and the projection cannot carry anything finer whatever calls it next.
 	 */
+	/**
+	 * Every captured payment, oldest first — what the accounts backfill (B21) walks to write the
+	 * entries the fee collections that predate the module would have produced.
+	 *
+	 * <p>No caller check, and none is missing: it is not reachable from a request, and the endpoint
+	 * behind it is an administrator's. CAPTURED only, for the same reason {@link #recent()} filters —
+	 * a gateway order nobody completed is not a taking and must not appear in the books.
+	 */
+	public List<Payment> capturedPayments() {
+		return payments.findByStatusOrderByPaidAtAsc(PaymentStatus.CAPTURED);
+	}
+
 	public List<PaymentSummary> recent() {
 		return payments.findTop10ByStatusOrderByPaidAtDesc(PaymentStatus.CAPTURED).stream()
 				.map(payment -> new PaymentSummary(payment.getId(), payment.getReceiptNo(),

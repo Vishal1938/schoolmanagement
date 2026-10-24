@@ -17,6 +17,7 @@ import com.school.payroll.domain.SalaryAdvance;
 import com.school.payroll.infra.SalaryAdvanceRepository;
 import com.school.people.app.EmployeeRef;
 import com.school.people.app.EmployeeService;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 /**
@@ -35,13 +36,15 @@ public class SalaryAdvanceService {
 	private final SalaryAdvanceRepository advances;
 	private final EmployeeService employees;
 	private final AuditService audit;
+	private final ApplicationEventPublisher events;
 	private final Clock clock;
 
 	public SalaryAdvanceService(SalaryAdvanceRepository advances, EmployeeService employees, AuditService audit,
-			Clock clock) {
+			ApplicationEventPublisher events, Clock clock) {
 		this.advances = advances;
 		this.employees = employees;
 		this.audit = audit;
+		this.events = events;
 		this.clock = clock;
 	}
 
@@ -81,6 +84,10 @@ public class SalaryAdvanceService {
 				.build());
 
 		audit.record(AuditAction.SALARY_ADVANCE_CREATED, AUDIT_ENTITY, saved.getId(), null, saved);
+		// Cash has left the drawer, so the books have to know — as an asset the school is owed, not as
+		// an expense. See SalaryAdvanceGivenEvent.
+		events.publishEvent(new SalaryAdvanceGivenEvent(saved.getId(), saved.getEmployeeUniqueId(),
+				saved.getEmployeeName(), saved.getAmount(), saved.getGivenOn(), saved.getReason()));
 		return saved;
 	}
 
@@ -97,6 +104,14 @@ public class SalaryAdvanceService {
 		}
 		return advances.findByEmployeeUniqueIdOrderByGivenOnDesc(
 				employees.requireRef(employeeUniqueId).uniqueId());
+	}
+
+	/**
+	 * Every advance ever given, oldest first — what the accounts backfill (B21) walks to book the
+	 * advances that predate the module. Not reachable from a request.
+	 */
+	public List<SalaryAdvance> all() {
+		return advances.findAllByOrderByGivenOnAsc();
 	}
 
 	/** What a run should deduct from, oldest advance first so the earliest one clears first. */

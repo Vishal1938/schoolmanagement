@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import com.school.people.domain.Employee;
 import com.school.people.domain.EmployeeStatus;
 import com.school.people.domain.EmployeeType;
+import com.school.people.domain.StaffRole;
 
 /**
  * One row of {@code GET /employees}.
@@ -25,7 +26,9 @@ public record EmployeeListItem(
 		EmployeeStatus status,
 		String designation,
 		String bankAccountLast4,
-		boolean hasLogin) {
+		boolean hasLogin,
+		/** Null for a teacher; {@code STAFF} or {@code ACCOUNTANT} for a staff member. */
+		StaffRole staffRole) {
 
 	public static EmployeeListItem of(Employee employee) {
 		return new EmployeeListItem(
@@ -39,6 +42,9 @@ public record EmployeeListItem(
 				employee.getStatus(),
 				employee.getDesignation(),
 				employee.getBank() == null ? null : employee.getBank().accountNumberLast4(),
-				employee.isHasLogin());
+				employee.isHasLogin(),
+				employee.getEmployeeType() == EmployeeType.TEACHER
+						? null
+						: (employee.getStaffRole() == null ? StaffRole.STAFF : employee.getStaffRole()));
 	}
 }

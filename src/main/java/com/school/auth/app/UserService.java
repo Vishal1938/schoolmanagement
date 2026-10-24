@@ -2,12 +2,14 @@ package com.school.auth.app;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 
 import com.school.auth.domain.User;
 import com.school.auth.infra.UserRepository;
 import com.school.common.audit.AuditAction;
 import com.school.common.audit.AuditService;
+import com.school.common.exceptions.BusinessRuleException;
 import com.school.common.exceptions.NotFoundException;
 import com.school.common.id.IdGenerator;
 import com.school.common.id.IdType;
@@ -196,6 +198,39 @@ public class UserService {
 	 */
 	public void rename(String uniqueId, String name) {
 		findByUniqueId(uniqueId).ifPresent(user -> users.updateName(user.getId(), name));
+	}
+
+	/**
+	 * Moves a login to a different role, and therefore to a different set of permissions.
+	 *
+	 * <p>The one caller is B6's employee update, where a staff member is made an accountant or taken
+	 * off it. It refuses to touch an ADMIN account and will not create one: a role change is an edit to
+	 * somebody's access, and the path it arrives on is the employee screen, which is not where the
+	 * administrator of a deployment should be appointed.
+	 *
+	 * <p><strong>Sessions are revoked.</strong> Permissions are expanded from the role into the access
+	 * token at login, and an access token already issued is not revocable — so without this, somebody
+	 * demoted from accountant would keep the fee and accounts permissions until their token expired.
+	 * Revoking the refresh tokens ends it at the next refresh, which is the same bound disabling an
+	 * account has.
+	 *
+	 * @return true when the role actually moved, false when it was already that role or there is no
+	 *         such login
+	 */
+	public boolean changeRole(String uniqueId, Role role) {
+		Optional<User> found = findByUniqueId(uniqueId);
+		if (found.isEmpty() || found.get().getRole() == role) {
+			return false;
+		}
+		User user = found.get();
+		if (user.getRole() == Role.ADMIN || role == Role.ADMIN) {
+			throw new BusinessRuleException("An administrator's role cannot be changed here");
+		}
+		users.updateRole(user.getId(), role);
+		refreshTokens.revokeAllForUser(user.getId());
+		audit.record(AuditAction.USER_ROLE_CHANGED, "User", user.getUniqueId(),
+				Map.of("role", user.getRole()), Map.of("role", role));
+		return true;
 	}
 
 	/** IDs are uppercase (API_CONTRACT.md §4), so a login typed in lower case still works. */

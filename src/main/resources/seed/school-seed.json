@@ -15,7 +15,8 @@
     "studentLogin": true,
     "onlinePayments": true,
     "landingPage": true,
-    "ai": true
+    "ai": true,
+    "accounts": true
   },
   "identity": {
     "name": "Demo Vidya Mandir Senior Secondary School",

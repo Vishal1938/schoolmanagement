@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.school.people.domain.EmployeeType;
 import com.school.people.domain.Gender;
+import com.school.people.domain.StaffRole;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Max;
@@ -19,9 +20,9 @@ import jakarta.validation.constraints.Size;
  * Body of {@code POST /employees} and {@code PUT /employees/{uniqueId}}.
  *
  * <p>The type decides which half of the body matters: {@code qualification}, {@code subjectIds} and
- * {@code experienceYears} apply to a TEACHER, {@code designation} and {@code hasLogin} to a STAFF
- * member. The other half is <em>ignored and cleared</em> rather than rejected, so a type change
- * cannot leave a designation stuck on a teacher.
+ * {@code experienceYears} apply to a TEACHER, {@code designation}, {@code hasLogin} and
+ * {@code staffRole} to a STAFF member. The other half is <em>ignored and cleared</em> rather than
+ * rejected, so a type change cannot leave a designation stuck on a teacher.
  *
  * <p>{@code uniqueId} and {@code status} are absent on purpose: the first is issued by the server
  * and never changes, the second has its own endpoint.
@@ -42,7 +43,16 @@ public record EmployeeRequest(
 		@Size(max = 40) List<@NotBlank String> subjectIds,
 		@Min(0) @Max(70) Integer experienceYears,
 		@Size(max = 80) String designation,
-		boolean hasLogin) {
+		boolean hasLogin,
+		StaffRole staffRole) {
+
+	/**
+	 * The login this staff member gets, defaulted. Omitted means {@code STAFF}, so a client that
+	 * predates the accountant role keeps creating plain staff logins.
+	 */
+	public StaffRole staffRoleOrDefault() {
+		return staffRole == null ? StaffRole.STAFF : staffRole;
+	}
 
 	/** Deliberately loose: phone-number shapes differ by country and this code is school-agnostic. */
 	static final String PHONE = "^[+0-9][0-9 ()/-]{5,31}$";

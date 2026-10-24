@@ -98,6 +98,16 @@ public class Employee {
 	/** Whether this staff member has a login. Always effectively true for a teacher. */
 	private boolean hasLogin;
 
+	/**
+	 * Which login this staff member gets (B21). Null on a teacher, and null on a staff document written
+	 * before this field existed, both of which read as {@link StaffRole#STAFF}.
+	 *
+	 * <p>Only meaningful together with {@link #hasLogin}: a staff member without a login has no role to
+	 * carry, and the field is kept rather than cleared so that switching the login back on restores
+	 * what the office had chosen.
+	 */
+	private StaffRole staffRole;
+
 	private Instant createdAt;
 
 	private Instant updatedAt;

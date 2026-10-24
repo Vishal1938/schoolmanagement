@@ -36,6 +36,9 @@ public final class HasPermission {
 	public static final String FEE_PAY_SELF = "hasAuthority('FEE_PAY_SELF')";
 	public static final String PAYROLL_MANAGE = "hasAuthority('PAYROLL_MANAGE')";
 	public static final String PAYROLL_READ_SELF = "hasAuthority('PAYROLL_READ_SELF')";
+	public static final String PAYROLL_READ = "hasAuthority('PAYROLL_READ')";
+	public static final String ACCOUNTS_MANAGE = "hasAuthority('ACCOUNTS_MANAGE')";
+	public static final String ACCOUNTS_READ = "hasAuthority('ACCOUNTS_READ')";
 	public static final String NOTICE_WRITE_ALL = "hasAuthority('NOTICE_WRITE_ALL')";
 	public static final String NOTICE_WRITE_CLASS = "hasAuthority('NOTICE_WRITE_CLASS')";
 	public static final String NOTICE_READ = "hasAuthority('NOTICE_READ')";
@@ -62,6 +65,35 @@ public final class HasPermission {
 	 */
 	public static final String NOTICE_WRITE_ALL_OR_CLASS =
 			"hasAnyAuthority('NOTICE_WRITE_ALL', 'NOTICE_WRITE_CLASS')";
+
+	/**
+	 * The payroll register and one record's slip, which an accountant reads and an administrator both
+	 * reads and writes. Only gate-keeps the endpoint; {@code PayrollService#requireReadable} still
+	 * decides whose record a caller may see.
+	 */
+	public static final String PAYROLL_READ_OR_MANAGE =
+			"hasAnyAuthority('PAYROLL_READ', 'PAYROLL_MANAGE')";
+
+	/**
+	 * Reading the books (B21). Spelled as either permission because {@code ACCOUNTS_MANAGE} without
+	 * {@code ACCOUNTS_READ} should still be able to see what it just wrote, and because an administrator
+	 * holds both.
+	 */
+	public static final String ACCOUNTS_READ_OR_MANAGE =
+			"hasAnyAuthority('ACCOUNTS_READ', 'ACCOUNTS_MANAGE')";
+
+	/**
+	 * The two accounts endpoints that are an administrator's and not an accountant's: locking a month
+	 * and the one-time backfill.
+	 *
+	 * <p>Written as the two permissions it actually needs rather than as {@code hasRole('ADMIN')},
+	 * because CLAUDE.md rule 1 forbids authorising on a role name. {@code SCHOOL_CONFIG_MANAGE} is the
+	 * permission that separates an administrator from an accountant — the accountant keeps the books,
+	 * the administrator decides what the deployment does — so requiring both says "an accountant may
+	 * not close their own month" without inventing a third permission for it.
+	 */
+	public static final String ACCOUNTS_ADMIN =
+			"hasAuthority('ACCOUNTS_MANAGE') and hasAuthority('SCHOOL_CONFIG_MANAGE')";
 
 	public static final String DASHBOARD_ADMIN = "hasAuthority('DASHBOARD_ADMIN')";
 	public static final String AUDIT_READ = "hasAuthority('AUDIT_READ')";

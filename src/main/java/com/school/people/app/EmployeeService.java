@@ -41,6 +41,7 @@ import com.school.people.domain.BankDetails;
 import com.school.people.domain.Employee;
 import com.school.people.domain.EmployeeStatus;
 import com.school.people.domain.EmployeeType;
+import com.school.people.domain.StaffRole;
 import com.school.people.infra.EmployeeRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
@@ -239,6 +240,13 @@ public class EmployeeService {
 				.build());
 
 		String temporaryPassword = createLoginIfNeeded(saved, before);
+		if (temporaryPassword == null && saved.isHasLogin()) {
+			// A login that already existed: this is where a staff member is made an accountant, or taken
+			// off it. A no-op when the role has not moved, and it revokes that account's sessions when it
+			// has — permissions are expanded into the access token at login (B21). An account created a
+			// moment ago by createLoginIfNeeded already has the right role, hence the null check.
+			users.changeRole(saved.getUniqueId(), roleOf(saved));
+		}
 		// The display name in the token and in /auth/me comes from the login, not from here.
 		if (!name.equals(before.getName())) {
 			users.rename(saved.getUniqueId(), name);
@@ -407,7 +415,9 @@ public class EmployeeService {
 				.designation(teacher ? null : trim(request.designation()))
 				// A teacher always has a login; for staff it is what the request asked for, and it is
 				// never taken away here — removing access is what the status endpoint is for.
-				.hasLogin(teacher || request.hasLogin() || (before != null && before.isHasLogin()));
+				.hasLogin(teacher || request.hasLogin() || (before != null && before.isHasLogin()))
+				// A teacher's login is always TEACHER, so the field has no meaning on one.
+				.staffRole(teacher ? null : request.staffRoleOrDefault());
 	}
 
 	/**
@@ -450,9 +460,22 @@ public class EmployeeService {
 	}
 
 	private static NewUser newUser(Employee employee, String temporaryPassword) {
-		Role role = employee.getEmployeeType() == EmployeeType.TEACHER ? Role.TEACHER : Role.STAFF;
-		return new NewUser(role, employee.getName(), employee.getEmail(), temporaryPassword, true,
+		return new NewUser(roleOf(employee), employee.getName(), employee.getEmail(), temporaryPassword, true,
 				employee.getId());
+	}
+
+	/**
+	 * The login role this employee's account carries: TEACHER for a teacher, and for a staff member
+	 * whichever of STAFF and ACCOUNTANT the office chose (B21).
+	 *
+	 * <p>A document written before {@code staffRole} existed has none, which reads as STAFF — the role
+	 * every staff login had when it was written.
+	 */
+	private static Role roleOf(Employee employee) {
+		if (employee.getEmployeeType() == EmployeeType.TEACHER) {
+			return Role.TEACHER;
+		}
+		return employee.getStaffRole() == StaffRole.ACCOUNTANT ? Role.ACCOUNTANT : Role.STAFF;
 	}
 
 	private EmployeeAdminView adminView(Employee employee) {

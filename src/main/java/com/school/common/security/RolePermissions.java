@@ -6,16 +6,21 @@ import java.util.EnumSet;
 import java.util.Map;
 import java.util.Set;
 
+import static com.school.common.security.Permission.ACCOUNTS_MANAGE;
+import static com.school.common.security.Permission.ACCOUNTS_READ;
 import static com.school.common.security.Permission.AI_USE;
 import static com.school.common.security.Permission.ATTENDANCE_MARK_STUDENT;
 import static com.school.common.security.Permission.EXAM_PAPER_READ;
 import static com.school.common.security.Permission.EXAM_PAPER_UPLOAD;
+import static com.school.common.security.Permission.FEE_MANAGE;
 import static com.school.common.security.Permission.FEE_PAY_SELF;
+import static com.school.common.security.Permission.FEE_READ_FULL;
 import static com.school.common.security.Permission.FEE_READ_STATUS;
 import static com.school.common.security.Permission.MARKS_READ_SELF;
 import static com.school.common.security.Permission.MARKS_WRITE;
 import static com.school.common.security.Permission.NOTICE_READ;
 import static com.school.common.security.Permission.NOTICE_WRITE_CLASS;
+import static com.school.common.security.Permission.PAYROLL_READ;
 import static com.school.common.security.Permission.PAYROLL_READ_SELF;
 import static com.school.common.security.Permission.QUIZ_ATTEMPT;
 import static com.school.common.security.Permission.QUIZ_MANAGE;
@@ -71,6 +76,19 @@ public final class RolePermissions {
 		map.put(Role.STAFF, EnumSet.of(
 				NOTICE_READ,
 				PAYROLL_READ_SELF));
+		// The office that handles money. Fees and the expense book in full, the salary register
+		// read-only, and nothing else: no school configuration, no user management, no payroll runs, no
+		// student or employee records. The two self-scoped permissions are the STAFF baseline every
+		// employee login carries — an accountant is a staff member, so they keep their own payslip and
+		// the notice board.
+		map.put(Role.ACCOUNTANT, EnumSet.of(
+				FEE_MANAGE,
+				FEE_READ_FULL,
+				ACCOUNTS_MANAGE,
+				ACCOUNTS_READ,
+				PAYROLL_READ,
+				PAYROLL_READ_SELF,
+				NOTICE_READ));
 		map.replaceAll((role, permissions) -> Collections.unmodifiableSet(permissions));
 		return Collections.unmodifiableMap(map);
 	}

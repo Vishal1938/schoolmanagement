@@ -15,7 +15,8 @@
     "studentLogin": false,
     "onlinePayments": false,
     "landingPage": false,
-    "ai": false
+    "ai": false,
+    "accounts": true
   },
   "identity": {
     "name": "Your College Name",

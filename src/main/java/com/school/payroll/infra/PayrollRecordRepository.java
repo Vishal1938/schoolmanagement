@@ -32,4 +32,10 @@ public interface PayrollRecordRepository extends MongoRepository<PayrollRecord, 
 	 * installments it has already planned but not yet taken off the balance.
 	 */
 	List<PayrollRecord> findByEmployeeUniqueIdAndStatus(String employeeUniqueId, PayrollStatus status);
+
+	/**
+	 * Every record in one state, in the order the money went out — the accounts backfill (B21), which
+	 * books salaries chronologically.
+	 */
+	List<PayrollRecord> findByStatusOrderByPaidOnAsc(PayrollStatus status);
 }

@@ -42,9 +42,10 @@ public class AdvanceController {
 	}
 
 	@GetMapping
-	@PreAuthorize(HasPermission.PAYROLL_MANAGE)
+	@PreAuthorize(HasPermission.PAYROLL_READ_OR_MANAGE)
 	@Operation(summary = "Advances, by employee or everything still owed",
-			description = "ADMIN. With `employeeUniqueId`, that employee's advances newest first, "
+			description = "ADMIN, and ACCOUNTANT read-only. With `employeeUniqueId`, that employee's "
+					+ "advances newest first, "
 					+ "including closed ones. Without it, every advance still being recovered across the "
 					+ "school — the list the office keeps open.")
 	public List<AdvanceResponse> list(@RequestParam(required = false) String employeeUniqueId) {

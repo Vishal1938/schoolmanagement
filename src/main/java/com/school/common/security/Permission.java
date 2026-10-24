@@ -88,6 +88,25 @@ public enum Permission {
 
 	PAYROLL_READ_SELF,
 
+	/**
+	 * Reading anybody's payroll — the register, the records and their slips — without being able to run
+	 * a month, pay one out or touch a structure. An accountant holds this and not
+	 * {@link #PAYROLL_MANAGE}: salaries are the largest line in the expense book, so the books have to
+	 * show them, while deciding what somebody is paid stays with the administrator.
+	 */
+	PAYROLL_READ,
+
+	// --- accounts, the expense tracker ------------------------------------------------------------
+
+	/**
+	 * Money accounts, categories, entries, bill payments and transfers. Automatic entries are not
+	 * reachable through it — a fee collection or a salary is changed where it was recorded.
+	 */
+	ACCOUNTS_MANAGE,
+
+	/** Reading the books: entries, balances and the summary. Amounts, so not a teacher's. */
+	ACCOUNTS_READ,
+
 	// --- notices (B10) ----------------------------------------------------------------------------
 
 	NOTICE_WRITE_ALL,
