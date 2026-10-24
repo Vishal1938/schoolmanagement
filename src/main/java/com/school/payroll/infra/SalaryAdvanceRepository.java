@@ -21,4 +21,7 @@ public interface SalaryAdvanceRepository extends MongoRepository<SalaryAdvance, 
 	/** What a run deducts from: still owed, oldest advance first so the earliest clears first. */
 	List<SalaryAdvance> findByEmployeeUniqueIdAndStatusOrderByGivenOnAsc(String employeeUniqueId,
 			AdvanceStatus status);
+
+	/** Every advance in the order it was given, for the accounts backfill (B21). */
+	List<SalaryAdvance> findAllByOrderByGivenOnAsc();
 }

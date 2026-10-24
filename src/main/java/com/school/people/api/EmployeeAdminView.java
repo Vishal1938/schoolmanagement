@@ -9,6 +9,7 @@ import com.school.people.domain.Employee;
 import com.school.people.domain.EmployeeStatus;
 import com.school.people.domain.EmployeeType;
 import com.school.people.domain.Gender;
+import com.school.people.domain.StaffRole;
 
 /**
  * Everything about an employee, for an administrator, with the bank account number decrypted.
@@ -36,6 +37,8 @@ public record EmployeeAdminView(
 		Integer experienceYears,
 		String designation,
 		boolean hasLogin,
+		/** Which login a staff member has: {@code STAFF} or {@code ACCOUNTANT}. Null for a teacher. */
+		StaffRole staffRole,
 		Instant createdAt,
 		Instant updatedAt) implements EmployeeView {
 
@@ -61,6 +64,9 @@ public record EmployeeAdminView(
 				employee.getExperienceYears(),
 				employee.getDesignation(),
 				employee.isHasLogin(),
+				employee.getEmployeeType() == EmployeeType.TEACHER
+						? null
+						: (employee.getStaffRole() == null ? StaffRole.STAFF : employee.getStaffRole()),
 				employee.getCreatedAt(),
 				employee.getUpdatedAt());
 	}

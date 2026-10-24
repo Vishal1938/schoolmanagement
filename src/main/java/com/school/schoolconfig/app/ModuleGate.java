@@ -67,7 +67,7 @@ public class ModuleGate {
 		Modules stored = modules();
 		return aiAvailable ? stored : new Modules(stored.exams(), stored.quizzes(), stored.examPapers(),
 				stored.notices(), stored.studentAttendance(), stored.studentLogin(), stored.onlinePayments(),
-				stored.landingPage(), false);
+				stored.landingPage(), false, stored.accounts());
 	}
 
 	/** The institution's vocabulary, defaulted. */

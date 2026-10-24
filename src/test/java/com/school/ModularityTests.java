@@ -21,7 +21,8 @@ class ModularityTests {
 	void everyFeaturePackageIsDetectedAsAModule() {
 		// Fails loudly if a module package is renamed or loses its package-info.java.
 		for (String module : new String[] {"common", "schoolconfig", "auth", "academics", "people", "attendance",
-				"exams", "quiz", "notice", "fees", "payment", "payroll", "dashboard", "ai", "demodata"}) {
+				"exams", "quiz", "notice", "fees", "payment", "payroll", "accounts", "dashboard", "ai",
+				"demodata"}) {
 			MODULES.getModuleByName(module)
 					.orElseThrow(() -> new AssertionError("Missing application module: " + module));
 		}

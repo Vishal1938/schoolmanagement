@@ -35,6 +35,13 @@ public enum AuditAction {
 	/** A login was issued — by the bootstrap initializer, the local seeder, or an admin adding a person. */
 	USER_CREATED,
 
+	/**
+	 * A login's role changed, and with it every permission it carries. Written when a staff member is
+	 * made an accountant or taken off it (B21). The sessions of that account are revoked in the same
+	 * call, because an access token already issued still carries the old permission list.
+	 */
+	USER_ROLE_CHANGED,
+
 	// --- school configuration (B1) --------------------------------------------------------------
 
 	/** First-boot seeding of {@code school_config}. */
@@ -328,6 +335,60 @@ public enum AuditAction {
 	 * record can never reach here.
 	 */
 	PAYROLL_RECORD_DELETED,
+
+	// --- accounts, the expense tracker (B21) ----------------------------------------------------
+
+	MONEY_ACCOUNT_CREATED,
+
+	MONEY_ACCOUNT_UPDATED,
+
+	/** Only ever possible while nothing has been booked to it; {@code before} is the account. */
+	MONEY_ACCOUNT_DELETED,
+
+	ACCOUNT_CATEGORY_CREATED,
+
+	ACCOUNT_CATEGORY_UPDATED,
+
+	/** As for a money account: refused once any entry names it, so retiring one is {@code active:false}. */
+	ACCOUNT_CATEGORY_DELETED,
+
+	/**
+	 * A line in the expense book. {@code after} is the whole entry — this covers a manual expense or
+	 * receipt and the automatic ones written from a fee collection, a salary or an advance alike, so
+	 * "where did this figure come from" is answerable for every line.
+	 */
+	ACCOUNT_ENTRY_CREATED,
+
+	/** A manual entry was corrected. Automatic entries never reach here. */
+	ACCOUNT_ENTRY_UPDATED,
+
+	/** {@code before} is the entry as it was, so a deletion by mistake is recoverable. */
+	ACCOUNT_ENTRY_DELETED,
+
+	/** An unpaid bill was settled: the date, the money account, the mode and the reference. */
+	ACCOUNT_ENTRY_PAID,
+
+	/** Cash moved between two of the school's own accounts. Neither income nor expense. */
+	ACCOUNT_TRANSFER_CREATED,
+
+	/** The default money accounts for fee collections and salaries were set. */
+	ACCOUNT_SETTINGS_UPDATED,
+
+	/** The books were closed up to a date: nothing on or before it can be written any more. */
+	ACCOUNTS_LOCKED,
+
+	/** An administrator re-opened a closed month. The one way back, and audited because it is. */
+	ACCOUNTS_UNLOCKED,
+
+	/**
+	 * The one-time backfill walked the fee payments, salaries and advances that predate the accounts
+	 * module and wrote the entries they would have produced. {@code after} holds the counts; every
+	 * entry it wrote has its own {@link #ACCOUNT_ENTRY_CREATED}.
+	 */
+	ACCOUNTS_BACKFILLED,
+
+	/** First-use seeding of the money account and the category list. */
+	ACCOUNTS_SEEDED,
 
 	// --- demonstration data (B20) ---------------------------------------------------------------
 

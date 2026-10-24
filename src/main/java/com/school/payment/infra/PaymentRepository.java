@@ -59,4 +59,10 @@ public interface PaymentRepository extends MongoRepository<Payment, String> {
 	 * {@code status, paidAt} index the collection report already needs.
 	 */
 	List<Payment> findTop10ByStatusOrderByPaidAtDesc(PaymentStatus status);
+
+	/**
+	 * Every payment in one state, oldest first — the accounts backfill (B21), which books fee
+	 * collections in the order they happened. Same index as the collection report.
+	 */
+	List<Payment> findByStatusOrderByPaidAtAsc(PaymentStatus status);
 }

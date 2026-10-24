@@ -58,7 +58,11 @@ public class ModuleGateInterceptor implements HandlerInterceptor {
 			new Gated("/payments/verify", SchoolModule.ONLINE_PAYMENTS),
 			new Gated("/public/payments/**", SchoolModule.ONLINE_PAYMENTS),
 			new Gated("/ai/**", SchoolModule.AI),
-			new Gated("/public/ai/**", SchoolModule.AI));
+			new Gated("/public/ai/**", SchoolModule.AI),
+			// The whole expense book, including the backfill: a deployment that keeps its accounts
+			// elsewhere has no use for any of it. The automatic entries are gated inside the listener
+			// instead, because an event is not a request and has no path to match.
+			new Gated("/accounts/**", SchoolModule.ACCOUNTS));
 
 	private static final AntPathMatcher MATCHER = new AntPathMatcher();
 

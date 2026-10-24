@@ -6,6 +6,7 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +48,7 @@ import com.school.payroll.domain.SalaryStructure;
 import com.school.payroll.infra.PayrollRecordRepository;
 import com.school.people.app.EmployeeRef;
 import com.school.people.app.EmployeeService;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -86,11 +88,12 @@ public class PayrollService {
 	private final EmployeeAttendanceService attendance;
 	private final AuditService audit;
 	private final AppProperties properties;
+	private final ApplicationEventPublisher events;
 	private final Clock clock;
 
 	public PayrollService(PayrollRecordRepository records, SalaryStructureService structures,
 			SalaryAdvanceService advances, EmployeeService employees, EmployeeAttendanceService attendance,
-			AuditService audit, AppProperties properties, Clock clock) {
+			AuditService audit, AppProperties properties, ApplicationEventPublisher events, Clock clock) {
 		this.records = records;
 		this.structures = structures;
 		this.advances = advances;
@@ -98,6 +101,7 @@ public class PayrollService {
 		this.attendance = attendance;
 		this.audit = audit;
 		this.properties = properties;
+		this.events = events;
 		this.clock = clock;
 	}
 
@@ -343,15 +347,20 @@ public class PayrollService {
 	}
 
 	/**
-	 * One record, for an administrator or the employee it belongs to.
+	 * One record, for an administrator, an accountant, or the employee it belongs to.
 	 *
 	 * <p>The object-level half of the slip's authorization, as CLAUDE.md rule 1 requires: the
 	 * annotation on the endpoint only decides who may ask at all.
+	 *
+	 * <p>{@code PAYROLL_READ} is here beside {@code PAYROLL_MANAGE} because salaries are the largest
+	 * line in the expense book and the books have to be able to show them (B21). Reading a slip is all
+	 * it allows — running a month, paying one out and touching a structure stay with the administrator.
 	 */
 	public PayrollRecord requireReadable(String id) {
 		PayrollRecord record = require(id);
 		AuthPrincipal caller = CurrentUser.require();
 		if (caller.permissions().contains(Permission.PAYROLL_MANAGE)
+				|| caller.permissions().contains(Permission.PAYROLL_READ)
 				|| record.getEmployeeUniqueId().equals(caller.uniqueId())) {
 			return record;
 		}
@@ -399,6 +408,17 @@ public class PayrollService {
 	 * caller — B20's demonstration data seeder — is behind {@code DEMO_DATA_MANAGE}. Anything a person
 	 * reads goes through {@link #month(String)} or {@link #requireReadable(String)}.
 	 */
+	/**
+	 * Every salary that has actually been paid, in the order it went out — what the accounts backfill
+	 * (B21) walks to book the months that predate the module.
+	 *
+	 * <p>No authorization check, for the same reason as {@link #pendingRecords(YearMonth)}: it is not
+	 * reachable from a request, and the endpoint behind it is an administrator's.
+	 */
+	public List<PayrollRecord> paidRecords() {
+		return records.findByStatusOrderByPaidOnAsc(PayrollStatus.PAID);
+	}
+
 	public List<PayrollRecord> pendingRecords(YearMonth month) {
 		return records.findByMonthOrderByEmployeeNameAsc(Months.format(month)).stream()
 				.filter(PayrollRecord::isPending)
@@ -479,13 +499,17 @@ public class PayrollService {
 					+ " by " + record.getMode() + ".");
 		}
 
+		// What each advance actually gave back, which the books need and which is not always what the
+		// run planned — see SalaryAdvanceRecoveredEvent. Collected rather than published as we go,
+		// because nothing is announced until the record itself has been written.
+		Map<String, Long> recovered = new LinkedHashMap<>();
 		for (AdvanceRecovery recovery : record.getAdvanceRecoveries() == null
 				? List.<AdvanceRecovery>of()
 				: record.getAdvanceRecoveries()) {
 			// The advance may have moved since the run planned this; recover() caps at what is owed and
 			// closes the advance when the last of it comes back.
 			advances.find(recovery.advanceId())
-					.ifPresent(advance -> advances.recover(advance, recovery.amount()));
+					.ifPresent(advance -> recovered.put(advance.getId(), advances.recover(advance, recovery.amount())));
 		}
 
 		PayrollRecord saved = records.save(record.toBuilder()
@@ -496,6 +520,16 @@ public class PayrollService {
 				.updatedAt(Instant.now(clock))
 				.build());
 		audit.record(AuditAction.PAYROLL_RECORD_PAID, AUDIT_ENTITY, saved.getId(), record, saved);
+
+		events.publishEvent(new PayrollRecordPaidEvent(saved.getId(), saved.getEmployeeUniqueId(),
+				saved.getEmployeeName(), saved.getMonth(), saved.getNet(), saved.getMode(), saved.getReference(),
+				saved.getPaidOn()));
+		recovered.forEach((advanceId, amount) -> {
+			if (amount > 0L) {
+				events.publishEvent(new SalaryAdvanceRecoveredEvent(advanceId, saved.getId(),
+						saved.getEmployeeUniqueId(), saved.getEmployeeName(), amount, saved.getPaidOn()));
+			}
+		});
 		return saved;
 	}
 

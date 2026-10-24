@@ -43,7 +43,10 @@ public enum NoticeAudience {
 			case ADMIN -> EnumSet.allOf(NoticeAudience.class);
 			case TEACHER -> EnumSet.of(ALL, TEACHERS);
 			case STUDENT -> EnumSet.of(ALL, STUDENTS);
-			case STAFF -> EnumSet.of(ALL, STAFF);
+			// An accountant is a member of staff whose login happens to carry extra permissions, so they
+			// see the staff board. Listed beside STAFF rather than folded into a default, so that a role
+			// added later fails this switch to compile and has to be thought about.
+			case STAFF, ACCOUNTANT -> EnumSet.of(ALL, STAFF);
 		};
 	}
 }

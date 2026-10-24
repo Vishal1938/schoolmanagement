@@ -28,7 +28,10 @@ public enum SchoolModule {
 
 	LANDING_PAGE,
 
-	AI;
+	AI,
+
+	/** The expense book (B21). Off takes {@code /accounts/**} away and stops the automatic entries. */
+	ACCOUNTS;
 
 	/** Whether this module is on in the given set, where anything it leaves unsaid is on. */
 	public boolean isOn(Modules modules) {
@@ -43,6 +46,7 @@ public enum SchoolModule {
 			case ONLINE_PAYMENTS -> effective.onlinePayments();
 			case LANDING_PAGE -> effective.landingPage();
 			case AI -> effective.ai();
+			case ACCOUNTS -> effective.accounts();
 		};
 	}
 }

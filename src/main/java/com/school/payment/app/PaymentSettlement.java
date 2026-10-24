@@ -119,6 +119,9 @@ public class PaymentSettlement {
 		}
 
 		audit.record(AuditAction.PAYMENT_CAPTURED, PaymentService.AUDIT_ENTITY, settled.getId(), before, settled);
+		// The same event a counter payment publishes, so the books do not care how the money arrived.
+		// Only on the path that actually settles: the early return above has already published once.
+		paymentService.publishCaptured(settled);
 		if (unallocated > 0L) {
 			// Loud on purpose: this is money the school holds and does not have a bill for.
 			log.warn("Payment {} captured {} paise but the invoices could only absorb {}; {} paise is owed back",

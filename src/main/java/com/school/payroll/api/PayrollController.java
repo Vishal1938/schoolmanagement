@@ -61,9 +61,10 @@ public class PayrollController {
 	}
 
 	@GetMapping("/runs/{month}")
-	@PreAuthorize(HasPermission.PAYROLL_MANAGE)
+	@PreAuthorize(HasPermission.PAYROLL_READ_OR_MANAGE)
 	@Operation(summary = "One month's payroll register and totals",
-			description = "ADMIN. `month` is `yyyy-MM`. Records are by employee name, and the totals are "
+			description = "ADMIN, and ACCOUNTANT read-only. `month` is `yyyy-MM`. Records are by employee "
+					+ "name, and the totals are "
 					+ "in paise: gross, net, and net split into what has been paid and what is still pending. "
 					+ "A month nobody has run comes back empty rather than 404.")
 	public PayrollMonthResponse month(@PathVariable String month) {

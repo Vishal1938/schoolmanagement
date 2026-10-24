@@ -171,7 +171,8 @@ public interface SchoolConfigMapper {
 				keep(requested.studentLogin(), base.studentLogin()),
 				keep(requested.onlinePayments(), base.onlinePayments()),
 				keep(requested.landingPage(), base.landingPage()),
-				keep(requested.ai(), base.ai()));
+				keep(requested.ai(), base.ai()),
+				keep(requested.accounts(), base.accounts()));
 	}
 
 	private static String keep(String requested, String current) {

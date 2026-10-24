@@ -73,4 +73,13 @@ public interface UserRepository extends MongoRepository<User, String> {
 	@Query("{ '_id': ?0 }")
 	@Update("{ '$set': { 'enabled': ?1 } }")
 	void updateEnabled(String id, boolean enabled);
+
+	/**
+	 * Moves a login to another role, which changes every permission it carries (B21). Targeted rather
+	 * than a whole save, for the same reason as the rest of these: a role change must not carry back a
+	 * stale copy of the password hash or the lockout state.
+	 */
+	@Query("{ '_id': ?0 }")
+	@Update("{ '$set': { 'role': ?1 } }")
+	void updateRole(String id, Role role);
 }

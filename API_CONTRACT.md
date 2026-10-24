@@ -120,55 +120,69 @@ needed. An unknown `uniqueId` is never locked, and answers exactly like a wrong 
 
 ### Roles
 
-`ADMIN`, `TEACHER`, `STUDENT`, `STAFF`
+`ADMIN`, `TEACHER`, `STUDENT`, `STAFF`, `ACCOUNTANT`
 
 The frontend must decide what to show using **`permissions`**, not `role`. Each role maps to a fixed set
 of permissions, listed in §2.1.
 
+`ACCOUNTANT` is the office that handles money: fees in full, the expense book in full, and the salary
+register read-only. It is **not** an administrator — no school configuration, no user management, no
+payroll runs, no student or employee records. An accountant is a **STAFF member with an EMP id**, hired
+exactly like any other through `POST /employees`, whose login carries this role instead of `STAFF`; see
+`staffRole` under §5 Employees.
+
 ### 2.1 Permissions
 
 The closed set, defined in `backend/.../common/security/Permission.java`. The authority string is the
-name exactly as written here. ADMIN holds all of them; the other three hold what is marked.
+name exactly as written here. ADMIN holds all of them; the other four hold what is marked.
 
-| Permission | TEACHER | STUDENT | STAFF | Covers |
-|---|:-:|:-:|:-:|---|
-| `STUDENT_READ_FULL` | | | | A student record including fees, guardians and contact details |
-| `STUDENT_READ_BASIC` | ✓ | | | The teacher-safe student projection: no fee amounts, no payment history |
-| `STUDENT_WRITE` | | | | Create, update and promote students |
-| `EMPLOYEE_READ` | | | | Read employee records |
-| `EMPLOYEE_WRITE` | | | | Create and update employees |
-| `IMPORT_CREDENTIALS_READ` | | | | Download the credentials file an Excel import produced |
-| `ATTENDANCE_MARK_STUDENT` | ✓ | | | Mark student attendance, within the configured edit window |
-| `ATTENDANCE_MARK_EMPLOYEE` | | | | Mark employee attendance |
-| `ATTENDANCE_CORRECT_ANY` | | | | Correct a register after the edit window has closed |
-| `HOLIDAY_MANAGE` | | | | Declare and remove holidays. Reading them needs no permission |
-| `MARKS_WRITE` | ✓ | | | Enter and update marks until the exam is published |
-| `MARKS_READ_SELF` | | ✓ | | Read one's own marks and report cards |
-| `EXAM_MANAGE` | | | | Create exams and move them through their statuses |
-| `EXAM_PAPER_UPLOAD` | ✓ | | | Upload to the exam-paper vault, and move the release time of one's own paper |
-| `EXAM_PAPER_READ` | ✓ | | | List the vault and download from it; 423 before `releaseAt` for teachers who did not upload it |
-| `FEE_MANAGE` | | | | Fee heads, structures, invoices, concessions, offline payments |
-| `FEE_READ_FULL` | | | | Invoices and amounts for any student |
-| `FEE_READ_STATUS` | ✓ | ✓ | | The derived status only (`PAID`/`DUE`/`PARTIAL`/`OVERDUE`), no amounts |
-| `FEE_PAY_SELF` | | ✓ | | Pay one's own invoices online |
-| `PAYROLL_MANAGE` | | | | Salary structures, payroll runs, payments |
-| `PAYROLL_READ_SELF` | ✓ | | ✓ | Read one's own payroll records and salary slips |
-| `NOTICE_WRITE_ALL` | | | | Write a notice for any audience, and make one public or pinned |
-| `NOTICE_WRITE_CLASS` | ✓ | | | Write `CLASS` notices, and edit or delete one's own |
-| `NOTICE_READ` | ✓ | ✓ | ✓ | Read notices for one's own audience, and download their attachments |
-| `QUIZ_MANAGE` | ✓ | | | Set quizzes, publish them and read their results |
-| `QUIZ_MANAGE_ALL` | | | | The same for *anybody's* quiz; without it a teacher is held to their own |
-| `QUIZ_ATTEMPT` | | ✓ | | Attempt a quiz |
-| `ACADEMICS_MANAGE` | | | | Create and edit sessions, classes, subjects and teaching assignments |
-| `SCHOOL_CONFIG_MANAGE` | | | | Read and replace the school configuration |
-| `DASHBOARD_ADMIN` | | | | The admin dashboard aggregates |
-| `AUDIT_READ` | | | | Read the audit trail, including one exam paper's access log |
-| `AI_USE` | ✓ | | | The AI endpoints, additionally gated by `app.features.ai` |
-| `DEMO_DATA_MANAGE` | | | | Seed and wipe the demonstration data set, additionally gated by `app.demo-data.enabled` |
+| Permission | TEACHER | STUDENT | STAFF | ACCT | Covers |
+|---|:-:|:-:|:-:|:-:|---|
+| `STUDENT_READ_FULL` | | | | | A student record including fees, guardians and contact details |
+| `STUDENT_READ_BASIC` | ✓ | | | | The teacher-safe student projection: no fee amounts, no payment history |
+| `STUDENT_WRITE` | | | | | Create, update and promote students |
+| `EMPLOYEE_READ` | | | | | Read employee records |
+| `EMPLOYEE_WRITE` | | | | | Create and update employees |
+| `IMPORT_CREDENTIALS_READ` | | | | | Download the credentials file an Excel import produced |
+| `ATTENDANCE_MARK_STUDENT` | ✓ | | | | Mark student attendance, within the configured edit window |
+| `ATTENDANCE_MARK_EMPLOYEE` | | | | | Mark employee attendance |
+| `ATTENDANCE_CORRECT_ANY` | | | | | Correct a register after the edit window has closed |
+| `HOLIDAY_MANAGE` | | | | | Declare and remove holidays. Reading them needs no permission |
+| `MARKS_WRITE` | ✓ | | | | Enter and update marks until the exam is published |
+| `MARKS_READ_SELF` | | ✓ | | | Read one's own marks and report cards |
+| `EXAM_MANAGE` | | | | | Create exams and move them through their statuses |
+| `EXAM_PAPER_UPLOAD` | ✓ | | | | Upload to the exam-paper vault, and move the release time of one's own paper |
+| `EXAM_PAPER_READ` | ✓ | | | | List the vault and download from it; 423 before `releaseAt` for teachers who did not upload it |
+| `FEE_MANAGE` | | | | ✓ | Fee heads, structures, invoices, concessions, offline payments |
+| `FEE_READ_FULL` | | | | ✓ | Invoices and amounts for any student |
+| `FEE_READ_STATUS` | ✓ | ✓ | | | The derived status only (`PAID`/`DUE`/`PARTIAL`/`OVERDUE`), no amounts |
+| `FEE_PAY_SELF` | | ✓ | | | Pay one's own invoices online |
+| `PAYROLL_MANAGE` | | | | | Salary structures, payroll runs, payments |
+| `PAYROLL_READ` | | | | ✓ | Read **anybody's** payroll register, records and slips, without being able to run or pay a month |
+| `PAYROLL_READ_SELF` | ✓ | | ✓ | ✓ | Read one's own payroll records and salary slips |
+| `ACCOUNTS_MANAGE` | | | | ✓ | Money accounts, categories, entries, bill payments and transfers |
+| `ACCOUNTS_READ` | | | | ✓ | Read the books: entries, balances and the summary |
+| `NOTICE_WRITE_ALL` | | | | | Write a notice for any audience, and make one public or pinned |
+| `NOTICE_WRITE_CLASS` | ✓ | | | | Write `CLASS` notices, and edit or delete one's own |
+| `NOTICE_READ` | ✓ | ✓ | ✓ | ✓ | Read notices for one's own audience, and download their attachments |
+| `QUIZ_MANAGE` | ✓ | | | | Set quizzes, publish them and read their results |
+| `QUIZ_MANAGE_ALL` | | | | | The same for *anybody's* quiz; without it a teacher is held to their own |
+| `QUIZ_ATTEMPT` | | ✓ | | | Attempt a quiz |
+| `ACADEMICS_MANAGE` | | | | | Create and edit sessions, classes, subjects and teaching assignments |
+| `SCHOOL_CONFIG_MANAGE` | | | | | Read and replace the school configuration |
+| `DASHBOARD_ADMIN` | | | | | The admin dashboard aggregates |
+| `AUDIT_READ` | | | | | Read the audit trail, including one exam paper's access log |
+| `AI_USE` | ✓ | | | | The AI endpoints, additionally gated by `app.features.ai` |
+| `DEMO_DATA_MANAGE` | | | | | Seed and wipe the demonstration data set, additionally gated by `app.demo-data.enabled` |
 
 A permission is coarse — "may enter marks at all". Object-level rules, such as a teacher only reaching
 their own classes or a student only their own records, are enforced per service and surface as 403
 `FORBIDDEN`. Permissions are additive across releases and are never renamed.
+
+Two accounts endpoints — `POST /accounts/lock` and `POST /accounts/backfill` — require
+`ACCOUNTS_MANAGE` **and** `SCHOOL_CONFIG_MANAGE` together. That is how "an administrator but not an
+accountant" is expressed without authorising on a role name: an accountant keeps the books and must not
+be able to close their own month.
 
 ## 3. Error shape
 
@@ -660,7 +674,7 @@ drops their `qualification`, `subjectIds` and `experienceYears`, and the reverse
 | Field | Applies to |
 |---|---|
 | `qualification`, `subjectIds`, `experienceYears` | TEACHER only; null on staff |
-| `designation` (free text: Accountant, Driver, Peon…), `hasLogin` | STAFF only; a teacher always has a login |
+| `designation` (free text: Accountant, Driver, Peon…), `hasLogin`, `staffRole` | STAFF only; a teacher always has a login |
 
 `subjectIds` are what a teacher *can* teach; which class they actually take is set by
 `PUT /classes/{id}/assignments`. Every id must exist → otherwise 400 on `subjectIds`.
@@ -679,6 +693,21 @@ for. `POST` and `PUT` therefore share one response shape:
 `hasLogin`, or any update that did not turn it on. The same once-only rules as for students apply:
 ten characters, no `O`/`0`/`l`/`1`/`I`, BCrypt hash only, never logged or audited,
 `mustChangePassword` set. 400 if you reset the password of an employee that has no login.
+
+**`staffRole`** decides *which* login a staff member gets: `STAFF` (the default) or `ACCOUNTANT`.
+Omitting it means `STAFF`, so a client that predates the role keeps creating plain staff logins. It is
+read on a `POST` and on a `PUT`, so an existing accountant can be demoted and a staff member promoted;
+null on a teacher, whose login is always `TEACHER`, and ignored on one. The value is returned on
+`GET /employees/{uniqueId}` and on each `GET /employees` row.
+
+Changing it **revokes that account's sessions**. Permissions are expanded from the role into the access
+token at login, so somebody demoted from accountant would otherwise keep the fee and accounts
+permissions until their token expired; they are signed out at the next refresh, the same bound as
+disabling an account. The change is audited as `USER_ROLE_CHANGED`. `ADMIN` is not a value this endpoint
+accepts in either direction — the administrator of a deployment is not appointed from the employee
+screen → 422. The Excel import has **no column** for it: an import creates plain staff logins and an
+accountant is appointed afterwards with a `PUT`, because a spreadsheet is the wrong place to hand out
+fee and accounts permissions.
 
 Unlike a student's, an employee's `email` **is** their login's address, so two employees cannot
 share one → 409 `CONFLICT`.
@@ -2032,9 +2061,9 @@ verify, never what was compared.
 | GET | `/payroll/structures/{employeeUniqueId}` | `PAYROLL_MANAGE` (ADMIN). Current version plus full history |
 | PUT | `/payroll/structures/{employeeUniqueId}` | `PAYROLL_MANAGE`. **Creates a new version**; never overwrites |
 | POST | `/payroll/advances` | `PAYROLL_MANAGE`. Recovered from future runs |
-| GET | `/payroll/advances?employeeUniqueId=` | `PAYROLL_MANAGE`. One employee's, or everything still owed |
+| GET | `/payroll/advances?employeeUniqueId=` | `PAYROLL_READ` or `PAYROLL_MANAGE`. One employee's, or everything still owed |
 | POST | `/payroll/runs` | `PAYROLL_MANAGE`. `{month, prorateByAttendance}` → PENDING records; idempotent |
-| GET | `/payroll/runs/{month}` | `PAYROLL_MANAGE`. Records plus totals |
+| GET | `/payroll/runs/{month}` | `PAYROLL_READ` or `PAYROLL_MANAGE`. Records plus totals |
 | POST | `/payroll/records/{id}/pay` | `PAYROLL_MANAGE`. `{mode, reference, paidOn}` |
 | POST | `/payroll/records/pay-bulk` | `PAYROLL_MANAGE`. `{recordIds, mode, paidOn}` |
 | DELETE | `/payroll/records/{id}` | `PAYROLL_MANAGE`. PENDING only, so a month can be re-run |
@@ -2044,6 +2073,10 @@ verify, never what was compared.
 **All money is `long` paise**, as everywhere else. A month is always the string `yyyy-MM` — in the
 body, in the path and on the record — because it sorts chronologically as text and brings no timezone
 with it.
+
+An `ACCOUNTANT` holds `PAYROLL_READ` and so may read the register, the advances and any slip, because
+salaries are the largest line in the expense book. Everything that *decides* a figure — a run, a
+payment, a structure (`GET`/`PUT /payroll/structures/…`) — stays on `PAYROLL_MANAGE`.
 
 #### Salary structure
 `GET /payroll/structures/{employeeUniqueId}`:
@@ -2245,6 +2278,281 @@ Every version of a structure, every advance and its recovery, every run, every r
 or discarded is written to `audit_logs`: `SALARY_STRUCTURE_VERSIONED`, `SALARY_ADVANCE_CREATED`,
 `SALARY_ADVANCE_RECOVERED`, `PAYROLL_RUN`, `PAYROLL_RECORD_CREATED`, `PAYROLL_RECORD_PAID` and
 `PAYROLL_RECORD_DELETED`. A run's entry holds the counts, since each record it wrote has its own.
+
+### Accounts (expense tracker)
+
+Behind the `accounts` module switch (§6): every path below answers 404 `FEATURE_DISABLED` when it is
+off.
+
+| Method | Path | Who |
+|---|---|---|
+| GET | `/accounts/money-accounts?active=` | `ACCOUNTS_READ`\|`ACCOUNTS_MANAGE`. With balances |
+| GET | `/accounts/money-accounts/{id}` | `ACCOUNTS_READ`\|`ACCOUNTS_MANAGE` |
+| POST | `/accounts/money-accounts` | `ACCOUNTS_MANAGE` |
+| PUT | `/accounts/money-accounts/{id}` | `ACCOUNTS_MANAGE` |
+| DELETE | `/accounts/money-accounts/{id}` | `ACCOUNTS_MANAGE`. Only while nothing is booked to it |
+| GET | `/accounts/categories?type=&active=` | `ACCOUNTS_READ`\|`ACCOUNTS_MANAGE` |
+| POST | `/accounts/categories` | `ACCOUNTS_MANAGE` |
+| PUT | `/accounts/categories/{id}` | `ACCOUNTS_MANAGE`. Not a system category |
+| DELETE | `/accounts/categories/{id}` | `ACCOUNTS_MANAGE`. Only while nothing is filed under it |
+| GET | `/accounts/entries?from=&to=&type=&category=&account=&status=&source=&q=&page=&size=` | `ACCOUNTS_READ`\|`ACCOUNTS_MANAGE` |
+| GET | `/accounts/entries/{id}` | `ACCOUNTS_READ`\|`ACCOUNTS_MANAGE` |
+| POST | `/accounts/entries` | `ACCOUNTS_MANAGE` |
+| PUT | `/accounts/entries/{id}` | `ACCOUNTS_MANAGE`. Manual entries only |
+| DELETE | `/accounts/entries/{id}` | `ACCOUNTS_MANAGE`. Manual entries only |
+| POST | `/accounts/entries/{id}/pay` | `ACCOUNTS_MANAGE`. Settles a bill payable |
+| POST | `/accounts/entries/attachments` (multipart) | `ACCOUNTS_MANAGE`. PDF/JPG/PNG ≤ 10 MB |
+| GET | `/accounts/entries/attachments/{key}` | `ACCOUNTS_READ`\|`ACCOUNTS_MANAGE`. Streams the file |
+| GET | `/accounts/transfers?from=&to=&page=&size=` | `ACCOUNTS_READ`\|`ACCOUNTS_MANAGE` |
+| POST | `/accounts/transfers` | `ACCOUNTS_MANAGE` |
+| GET | `/accounts/settings` | `ACCOUNTS_READ`\|`ACCOUNTS_MANAGE` |
+| PUT | `/accounts/settings` | `ACCOUNTS_MANAGE`. Default money accounts |
+| GET | `/accounts/summary?from=&to=` | `ACCOUNTS_READ`\|`ACCOUNTS_MANAGE` |
+| POST | `/accounts/lock` | `ACCOUNTS_MANAGE` **and** `SCHOOL_CONFIG_MANAGE` (ADMIN) |
+| POST | `/accounts/backfill` | `ACCOUNTS_MANAGE` **and** `SCHOOL_CONFIG_MANAGE` (ADMIN) |
+
+**All money is `long` paise** (§1), and every `amount` is **positive**: the direction is `type`, never
+a sign, so no report has to decide whether a negative expense is a refund or a typo.
+
+**Seeded on first use, not at boot.** The first call to any of these creates `"Cash in hand"` (CASH,
+opening 0) and the category list below. On first use because this is an optional module: a deployment
+that switches it off should not have the collections appear, and one that switches it on a year later
+gets the list then.
+
+#### Money accounts
+`{name, type: CASH|BANK, bankName, accountNumberLast4, openingBalance, openingDate, active}`.
+
+```json
+{ "id": "67e1...", "name": "SBI current", "type": "BANK", "bankName": "State Bank of India",
+  "accountNumberLast4": "4821", "openingBalance": 25000000, "openingDate": "2026-04-01",
+  "active": true, "balance": 41375000 }
+```
+
+- `balance` is the opening balance **plus every settled entry and transfer since** — computed on read,
+  never stored, so it cannot drift out of step with the lines behind it. Unpaid bills are not in it:
+  a bill the school has not paid has moved no money. It is `null` on the response to a create or an
+  update, where the figure would only be the opening balance dressed up as a balance.
+- `bankName` and `accountNumberLast4` are **ignored and cleared** on a CASH account rather than
+  rejected, so switching the type cannot leave a bank name on the cash drawer. Only the last four
+  digits are ever stored, as for `panLast4`.
+- `openingBalance` may be negative (an overdraft) and stays editable on purpose: it is the one figure
+  a school never has right on day one, and correcting it is how the computed balance comes to agree
+  with the passbook. Every change is in the trail.
+- `DELETE` is 409 once any entry or transfer names it. Retire one with `active: false`, which keeps it
+  off the entry screen and leaves its statement readable — the same rule as a fee head.
+
+#### Categories
+`{name, type: EXPENSE|INCOME, active}`. A name is unique **per type**, so a school may have both an
+`Interest` income and an `Interest` expense → 409 otherwise.
+
+Seeded EXPENSE: Electricity, Water, Rent, Building maintenance, Repairs, Stationery & printing,
+Furniture & equipment, Exam expenses, University/affiliation fees, Events & functions, Travel,
+Internet & phone, Cleaning & sanitation, Bank charges, Miscellaneous.
+
+Seeded INCOME: Donation, Government grant, Hall/ground rent, Scrap sale, Interest,
+Miscellaneous income.
+
+That list is a **starting point, not a vocabulary the code depends on** (CLAUDE.md rule 6): rename,
+retire or add to it freely. Nothing looks a category up by name.
+
+Three are the application's own, and come back with `system: true`:
+
+| Category | `type` | `asset` | Written by |
+|---|---|:-:|---|
+| `Fees collected` | INCOME | | every CAPTURED fee payment |
+| `Salaries` | EXPENSE | | every PAID payroll record, at the **net** |
+| `Staff advances` | EXPENSE | ✓ | an advance given, and each recovery on the income side |
+
+Show them — they are where the fee and salary figures are — but never offer them on the entry form and
+never offer an edit: `PUT`, `DELETE` and naming one on an entry are all 422. Renaming or retiring one
+would change where the automatic writers put money or stop them finding a category at all.
+
+`asset: true` means **the school's own money moving, not income or expense**. An advance handed to an
+employee has left a drawer but is still the school's, and the installment that comes back is not
+earnings, so neither side is in any month's income or expense total — see `/accounts/summary`.
+
+#### Entries
+`POST /accounts/entries` → 201:
+
+```json
+{ "id": "67f3...", "type": "EXPENSE", "date": "2026-10-14",
+  "categoryId": "67e2...", "categoryName": "Electricity", "asset": false,
+  "amount": 1847500, "party": "State Electricity Board",
+  "description": "September units, meter 44/B",
+  "moneyAccountId": "67e1...", "moneyAccountName": "SBI current",
+  "mode": "BANK_TRANSFER", "reference": "UTR552190", "billNo": "SEB/26/88421",
+  "attachments": [ { "fileName": "seb-sept.pdf",
+                     "url": "/api/v1/accounts/entries/attachments/8f1c....pdf",
+                     "sizeBytes": 148221 } ],
+  "status": "PAID", "dueDate": null, "paidOn": "2026-10-14",
+  "recordedBy": "DEMO-EMP-26-0012", "source": "MANUAL", "sourceRef": null,
+  "editable": true, "createdAt": "2026-10-14T09:12:00Z", "updatedAt": "2026-10-14T09:12:00Z" }
+```
+
+- `status` defaults to `PAID`, which needs `moneyAccountId` and `mode`; `paidOn` then defaults to
+  `date`.
+- **`UNPAID` is a bill payable and only valid for an `EXPENSE`** → 422 otherwise. It needs `dueDate`
+  and carries no money account, mode or reference until it is settled. There is no unpaid *income*:
+  money owed **to** the school is a fee invoice, and a second home for receivables would mean two
+  answers to "what are we owed".
+- `mode` is `CASH|UPI|BANK_TRANSFER|CHEQUE`. Its own list: a gateway collection lands in a bank
+  account, so the books record that rather than which checkout a family used.
+- `date` is **the day the books record this on** — the bill's date, or the day the money moved — and
+  not when the row was written. An invoice entered a week late still belongs to the week it is dated,
+  which is what every report and the month lock work from. A future `date` or `paidOn` is 422.
+- 422 for a retired category or money account, and for a category on the wrong side of the books.
+
+**`editable: false` marks everything the application wrote itself** (`source` other than `MANUAL`).
+`PUT` and `DELETE` are 422 for those: the line is the shadow of a fact recorded elsewhere, and editing
+the shadow would leave the books and the fee register disagreeing with nothing to say which is right.
+Change the payment in fees or the record in payroll, and the books follow. A client should render those
+rows read-only and link across rather than offering an edit that will 422.
+
+`POST /accounts/entries/{id}/pay` with `{paidOn, moneyAccountId, mode, reference}` settles a bill
+payable. `paidOn` defaults to today and may not be in the future; 409 if it has already been paid.
+There is **no amount** — a bill is paid in full or it is two bills, which is how an office records it
+anyway.
+
+**Listing.** All filters optional and ANDed; `from`/`to` are inclusive and match the entry's own
+`date`. `q` is an anchored prefix against `party` and `billNo`. Default sort is `date` descending.
+
+**Attachments.** `POST /accounts/entries/attachments` (multipart `file`) → `{fileName, url, sizeBytes}`.
+PDF, JPEG or PNG up to 10 MB, identified by the file's **own leading bytes** rather than its
+`Content-Type`, so an uploaded bill can never be an Office macro document, an archive or an SVG. Put
+the returned object into the entry's `attachments` array — uploading alone saves nothing. At most 5 per
+entry. A `url` from anywhere else is 422, so the books cannot become a redirect service. Files are
+stored **privately** and streamed back through `GET …/attachments/{key}`: a vendor invoice names amounts
+and bank details, so it never leaves this application's authentication.
+
+#### Automatic entries
+Written by listening for an event, so nothing in fees, payment or payroll knows the books exist:
+
+| Trigger | Entry |
+|---|---|
+| a fee payment reaches `CAPTURED` (counter or gateway) | INCOME `Fees collected`, `amount` = what was received, `date` = `paidAt`, account = `cashFeesTo` when the mode is CASH and `bankFeesTo` otherwise, `reference` = the receipt number |
+| a payroll record is `PAID` | EXPENSE `Salaries`, `amount` = the **net**, `date` = `paidOn`, account = `salariesFrom` |
+| an advance is given | EXPENSE `Staff advances` (an asset), `date` = `givenOn`, account = `salariesFrom` |
+| an installment of an advance is recovered | INCOME `Staff advances`, `date` = the salary's `paidOn`, no money account — nothing physically moved |
+
+The salary is booked at the **net**, not the gross: deductions and the advance installment never leave
+the school, so the gross would overstate the month by every rupee it withheld. The installment has its
+own entry on the other side of the asset category.
+
+**Idempotent, keyed on `sourceRef`** (`payment:{id}`, `payroll:{id}`, `advance:{id}`,
+`advance-recovery:{advanceId}:{recordId}`), with a unique index behind it. A webhook delivered twice, a
+verify call racing it, or a second backfill all book nothing the second time.
+
+Three deliberate choices:
+
+- **A failure here never fails the payment.** The listeners run after the transaction commits and
+  swallow their errors into an error log. The money has moved; a failed receipt is a worse outcome than
+  a missing line, and `POST /accounts/backfill` puts it right.
+- **They are not held to the month lock.** A payment taken today or a salary backdated into a closed
+  month has already happened, and refusing to book it would leave the books quietly short. The lock
+  stops a *person* rewriting a closed period, which it still does.
+- **A missing default account is not a refusal.** The entry is written with `moneyAccountId: null` and
+  shows as unassigned, because losing the line would be worse. Set `/accounts/settings` **before** the
+  first payment: a backfill will not fix an entry that already exists.
+
+#### Settings
+`GET`/`PUT /accounts/settings`:
+
+```json
+{ "defaults": { "cashFeesTo": "67e0...", "bankFeesTo": "67e1...", "salariesFrom": "67e1..." },
+  "lockedUpTo": "2026-09-30", "updatedAt": "2026-10-01T04:30:00Z" }
+```
+
+`PUT` takes the three ids only, as a wholesale replacement — omitting one clears it. Each is checked to
+be a money account that exists → 422 otherwise, because a typo here would quietly send every future fee
+collection to an account nobody looks at. 409 if two administrators save at once.
+
+#### Transfers
+`POST /accounts/transfers` with `{date, fromAccountId, toAccountId, amount, reference, note}` → 201 —
+the week's cash banked, say.
+
+**Neither income nor expense.** Nothing was earned and nothing was spent: the same money is in a
+different place. So a transfer appears in no month's totals, is kept apart from the entries rather than
+as a pair of them every report would have to remember to exclude, and only moves two balances.
+
+Append-only, like a payment: one entered the wrong way round is corrected by a transfer going back, so
+that both statements show what actually happened. 422 for the same account twice, a future date, a
+retired account, or a date inside a closed period. It does **not** check that the source account has the
+money — a cash book can legitimately go briefly negative on paper, and refusing the entry would make the
+books disagree with the passbook, which is the one thing they must not do. The balance is visible, so an
+account that should not be negative shows as negative.
+
+#### Month lock
+`POST /accounts/lock` with `{upTo: "2026-09-30"}` closes the books on and before that day: no entry or
+transfer dated then can be added, edited, deleted or paid. Both the old and the new date are checked
+when a line is moved, because moving one *out* of a closed month rewrites it just as much as moving one
+in.
+
+**`{upTo: null}` re-opens everything**, and an earlier date re-opens the difference. Both are allowed to
+an ADMIN and both are audited as `ACCOUNTS_UNLOCKED` — re-opening a closed month is exactly the thing
+somebody would want to find in the trail afterwards. 422 for a date in the future: a period is closed
+once it is over. A refused write is 422 and names the lock date.
+
+A date, not a month, because "closed to 30 September" is what an office says and a month boundary would
+make closing a half-month impossible.
+
+#### Summary
+`GET /accounts/summary?from=&to=`, defaulting to the current calendar month:
+
+```json
+{ "from": "2026-10-01", "to": "2026-10-31",
+  "income": 184500000, "expense": 97340000, "net": 87160000,
+  "advancesGiven": 3000000, "advancesRecovered": 1000000, "advancesOutstanding": 2000000,
+  "payable": 4820000, "overdue": 1847500,
+  "byCategory": [ { "category": "Fees collected", "amount": 178000000 },
+                  { "category": "Salaries", "amount": 81200000 },
+                  { "category": "Electricity", "amount": 5420000 } ],
+  "balances": [ { "id": "67e0...", "name": "Cash in hand", "type": "CASH",
+                  "active": true, "balance": 1240000 },
+                { "id": "67e1...", "name": "SBI current", "type": "BANK",
+                  "active": true, "balance": 41375000 } ] }
+```
+
+- **Advances are in neither `income` nor `expense`**, for the reason under Categories. They are
+  reported on their own, with `advancesOutstanding` = given less recovered over the range.
+- Only `PAID` entries count. An unpaid bill is under `payable`, with the part past its due date under
+  `overdue`; counting it as expense would double it the day it is settled. `payable` and `overdue` are
+  **not** range-filtered: a bill falling due next week does not belong to the month on screen.
+- `balances` are **as of now**, not as of the end of the range. "What is in the drawer" has one answer,
+  and it is not a function of which month is being looked at.
+- `byCategory` is biggest first, income and expense together — a category is already one or the other.
+
+Every create, update, delete, bill payment, transfer, settings change, lock, unlock and backfill is
+written to `audit_logs`: `MONEY_ACCOUNT_CREATED`/`_UPDATED`/`_DELETED`,
+`ACCOUNT_CATEGORY_CREATED`/`_UPDATED`/`_DELETED`, `ACCOUNT_ENTRY_CREATED`/`_UPDATED`/`_DELETED`/`_PAID`,
+`ACCOUNT_TRANSFER_CREATED`, `ACCOUNT_SETTINGS_UPDATED`, `ACCOUNTS_LOCKED`, `ACCOUNTS_UNLOCKED`,
+`ACCOUNTS_BACKFILLED` and `ACCOUNTS_SEEDED`. The automatic entries are audited too, under
+`ACCOUNT_ENTRY_CREATED`, so every line in the books has an entry saying where it came from.
+
+#### Backfill
+`POST /accounts/backfill` → ADMIN. Walks every captured fee payment, every salary paid out and every
+advance and recovery, writing the entries each would have produced:
+
+```json
+{ "feesWritten": 412, "feesSkipped": 0, "salariesWritten": 88, "salariesSkipped": 0,
+  "advancesWritten": 3, "advancesSkipped": 0, "recoveriesWritten": 5, "recoveriesSkipped": 0 }
+```
+
+It exists because this is a module a deployment can switch on at any point: a school that has been
+collecting fees for a year would otherwise open an empty day book with no way to produce a figure for a
+month that has gone.
+
+**Safe to run more than once, and on a live deployment.** Everything underneath is keyed on
+`sourceRef`, so a record already booked comes back under `skipped` and is left exactly as it is —
+including a money account somebody has since corrected by hand. There is no wipe-and-rebuild; it only
+ever adds what is missing. Not one transaction either: a year of a real school is thousands of entries,
+which would exceed Atlas's 60-second transaction limit, so a run that dies halfway is finished by the
+next one.
+
+Recoveries are read off the **paid payroll records**, which name the advances they deducted from and by
+how much, because an advance stores only one running total that cannot be split back into months. The
+figure is therefore the installment the run *planned*, where a live recovery books what was actually
+taken — a little less on a last installment. The `sourceRef` is the same either way, so the two can
+never double up.
 
 ### Dashboards
 | Method | Path | Who |
@@ -2755,7 +3063,7 @@ are switched on lives in `school_config.modules`, and what the institution *call
 `school_config.terms`. Both are published on `GET /public/school` (§5) and edited through
 `PUT /school/config`.
 
-**All nine modules default to `true`.** A deployment configured before any of this existed has no
+**All ten modules default to `true`.** A deployment configured before any of this existed has no
 `modules` subdocument at all, which reads as everything on — so nothing about a school already
 running changes, and switching something off is always a deliberate act by an administrator.
 
@@ -2770,6 +3078,7 @@ running changes, and switching something off is always a deliberate act by an ad
 | `studentAttendance` | `/attendance/class/**` (the daily register) and `/attendance/students/**` (one student's history). **Employee attendance is not covered** — `/attendance/employees**` keeps working, because payroll prorates salaries from it |
 | `onlinePayments` | `/payments/orders`, `/payments/verify`, `/public/payments/webhook` |
 | `ai` | `/ai/**` and `/public/ai/**`, in addition to the `APP_FEATURES_AI` environment switch |
+| `accounts` | `/accounts/**` — the whole expense book, including the backfill. It also stops the automatic entries accumulating, which is why switching it on later starts with `POST /accounts/backfill` |
 | `studentLogin` | No path. It changes behaviour instead — see below |
 | `landingPage` | No path. `GET /public/school` omits the landing block instead — see §5 |
 

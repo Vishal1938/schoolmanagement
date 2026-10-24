@@ -45,6 +45,10 @@ package com.school.schoolconfig.domain;
  *                       the login screen — and omits the landing block entirely
  * @param ai             the AI features. Gated by {@code APP_FEATURES_AI} as well: this one is the
  *                       institution's choice, that one is the deployment's, and both have to say yes
+ * @param accounts       the expense book: money accounts, categories, entries and transfers. Off
+ *                       means an institution that keeps its accounts in Tally or in a ledger and
+ *                       wants nothing here. The automatic entries stop with it, which is why
+ *                       {@code POST /accounts/backfill} exists to catch up afterwards
  */
 public record Modules(
 		Boolean exams,
@@ -55,10 +59,12 @@ public record Modules(
 		Boolean studentLogin,
 		Boolean onlinePayments,
 		Boolean landingPage,
-		Boolean ai) {
+		Boolean ai,
+		Boolean accounts) {
 
 	/** The default, and what a missing {@code modules} subdocument means. */
-	public static final Modules ALL_ON = new Modules(true, true, true, true, true, true, true, true, true);
+	public static final Modules ALL_ON =
+			new Modules(true, true, true, true, true, true, true, true, true, true);
 
 	/**
 	 * This set with every switch it does not mention turned on.
@@ -77,7 +83,8 @@ public record Modules(
 				orOn(studentLogin),
 				orOn(onlinePayments),
 				orOn(landingPage),
-				orOn(ai));
+				orOn(ai),
+				orOn(accounts));
 	}
 
 	private static Boolean orOn(Boolean value) {

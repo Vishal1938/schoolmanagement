@@ -178,7 +178,11 @@ public class EmployeeImportService {
 				null,
 				teacher ? null : designation,
 				// A teacher always gets a login; for staff the column decides, and a blank means no.
-				teacher || Boolean.TRUE.equals(canLogin)));
+				teacher || Boolean.TRUE.equals(canLogin),
+				// The spreadsheet has no column for it: an import creates plain staff logins, and an
+				// accountant is appointed afterwards through PUT /employees/{uniqueId}. A column would
+				// hand out fee and accounts permissions to whoever filled the file in.
+				null));
 	}
 
 	/**
